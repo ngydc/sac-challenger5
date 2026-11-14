@@ -1,5 +1,9 @@
 # sac-challenger5 — Planet X and SPHEREx
 
+
+Teamname: CHALLENGER5
+Team members: Can, Duc, Daniel, Maximilian
+
 NASA Space Apps Challenge 2026: a public web tool that shows [SPHEREx](https://irsa.ipac.caltech.edu/Missions/spherex.html) sky images of a given RA/Dec as a time-ordered "blink" animation, so moving and varying objects are easy to spot.
 
 Challenge: https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/
@@ -47,3 +51,4 @@ docs/       project overview and resources
 ```
 
 The `frontend/` and `backend/` folders don't exist yet, so create them first (`ng new frontend`, and a FastAPI app in `backend/app/`).
+
