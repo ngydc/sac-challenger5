@@ -47,12 +47,14 @@ Everything below comes from `docs/spherex/`; the file to read for detail is in b
 - Cite the DOI of each release used: DR1 spectral images 10.26131/IRSA678, DR1 All-Sky Cube 10.26131/IRSA679, QR3 10.26131/IRSA662, QR2 10.26131/IRSA652, QR1 10.26131/IRSA629.
 
 ## Project
-Fill in; Claude should treat these as the user's decisions.
-- **Goal:** <what this project should produce, in one or two sentences>
-- **SPHEREx data I use:** <releases/collections (DR1, QR3, deep?), detectors/bands, products (spectral images, cutouts, All-Sky Cube), sky targets or regions, date range>
-- **How I get it:** <astroquery / SIA2 / TAP / directories / S3 / Data Explorer>
-- **Environment:** <OS, Python version, key packages and versions, where downloads and caches live, hosting/network limits>
-- **Output and audience:** <who uses the result and in what form>
-- **Open questions:** <anything still undecided>
+From `docs/PROJECT_OVERVIEW.md` and `README.md`. These are team notes and decisions, not official SPHEREx documentation; items marked (team) are the team's own measurements or plans and are not confirmed by `docs/spherex/`.
+- **Team and event:** CHALLENGER5 (Can, Duc, Daniel, Maximilian). NASA Space Apps Challenge 2026, "Planet X and SPHEREx" (Advanced). Event dates Nov 14-15, so build the required MVP first, then optional features.
+- **Goal:** a public web tool (no install) that takes sky coordinates (RA/Dec, sexagesimal and ideally decimal degrees), fetches SPHEREx images covering that spot, orders them by observation time and plays them as a short "blink" animation, so moving or varying objects (asteroids, comets, nearby stars, brown dwarfs) stand out. It is the SPHEREx counterpart of WiseView.
+- **Acceptance tests (required targets):** Barnard's Star, Epsilon Indi B, WISE 0855 (all three move; catalogue positions are years out of date, so proper motion or a wide field is needed), RW Aurigae and R Draconis (static, test brightness change; the stretch must stay consistent across frames). Positions are in `docs/PROJECT_OVERVIEW.md` section 3.
+- **SPHEREx data I use:** Level 2 spectral images from DR1 + QR3 (`spherex_dr1`, `spherex_qr3`, optionally the `_deep` collections), fetched as cutouts around the target. Not QR2. The All-Sky Cube has no time information, so it is at most a background or overview layer (team). Optional overlays: Gaia DR3 and WISE (Aladin Lite).
+- **How I get it:** a FastAPI backend searches IRSA (SIA2; TAP only when data from the last day is needed), fetches and caches cutouts, and serves small frames to the frontend. The browser cannot call IRSA directly (team: no CORS headers were seen), so the proxy is required.
+- **Environment:** Windows 11. Backend: Python 3.11+, FastAPI, astropy. Frontend: Angular, Node 20+. `backend/` and `frontend/` do not exist yet. Downloaded FITS and caches go in `backend/cache/` and `backend/data/` (git-ignored, as is `*.fits`).
+- **Output and audience:** a well usable public web page with RA/Dec entry, URL parameters (`?ra=...&dec=...&fov=...`) for sharing, and a blink player (play/pause/step). Good unser experience and nice visualization is the primary goal. Optional features in priority order: adjustable field of view, per-detector co-adds, add/subtract images from different epochs, Gaia/WISE overlays, metadata display (flags, dates), on-the-fly spectra, easy updates with new releases (no hard-coded datasets).
+- **Open questions:** what counts as one "frame", since images of one spot come from different detectors at different times; proper-motion input vs a wide field; latency (team: about 10 s per cutout, so fetch in parallel, cache and show frames as they arrive); how many distinct epochs exist per target; hosting, public access and IRSA rate limits; the Space Apps judging criteria (not yet checked).
 
 @docs/INDEX.md
