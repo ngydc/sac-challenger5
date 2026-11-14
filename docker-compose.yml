@@ -1,4 +1,27 @@
+# Start:   docker compose up --build          -> http://localhost:4200 (dev, live reload)
+# Prod:    docker compose --profile prod up --build frontend-prod   -> http://localhost:8080
 services:
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    ports:
+      - "4200:4200"
+    environment:
+      API_TARGET: http://backend:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # keep the container's Linux node_modules, don't use the host's
+    restart: unless-stopped
+
+  frontend-prod:
+    profiles: ["prod"]
+    build:
+      context: ./frontend
+      target: prod
+    ports:
+      - "8080:80"
+
   db:
     image: postgres:17
     environment:

@@ -24,7 +24,7 @@ The browser can't call IRSA directly (no CORS headers), so the backend searches 
 
 ## Getting started
 
-Requirements: Node.js 20+ with the Angular CLI, and Python 3.11+.
+Requirements: Node.js 22.22+ or 24.15+ (Angular 22), Python 3.11+, optionally Docker Desktop.
 
 **Backend**
 ```bash
@@ -35,20 +35,29 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload   # http://localhost:8000  (API docs at /docs)
 ```
 
-**Frontend**
+**Frontend** (Angular 22, local)
 ```bash
 cd frontend
 npm install
-ng serve                        # http://localhost:4200
+npm start                       # http://localhost:4200  (/api is proxied to localhost:8000)
 ```
 
-## Layout (planned)
-
-```
-backend/    FastAPI app (app/main.py), requirements.txt
-frontend/   Angular app
-docs/       project overview and resources
+**Frontend with Docker Desktop** (from the repo root)
+```bash
+docker compose up --build                                  # dev server with live reload: http://localhost:4200
+docker compose --profile prod up --build frontend-prod     # production build via nginx: http://localhost:8080
 ```
 
-The `frontend/` and `backend/` folders don't exist yet, so create them first (`ng new frontend`, and a FastAPI app in `backend/app/`).
+The frontend calls the backend only through relative `/api/...` paths. In development the Angular dev server forwards them (`frontend/proxy.conf.mjs`); in production nginx does (`frontend/nginx.conf`). So backend routes should live under `/api`.
 
+## Layout
+
+```
+backend/              FastAPI app (app/main.py), requirements.txt  (not created yet)
+frontend/             Angular 22 app (standalone components, SCSS, Vitest)
+  src/app/pages/      routed pages (home)
+  src/app/core/       app-wide config/services (API_BASE_URL)
+  Dockerfile          targets: dev (ng serve), prod (nginx)
+docker-compose.yml    starts frontend (later backend too)
+docs/                 project overview and resources
+```
