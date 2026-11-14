@@ -5,7 +5,7 @@ import psycopg
 import psycopg_pool
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from . import db
 from .api import api_error_handler, router
@@ -64,7 +64,7 @@ app.include_router(router)
 
 @app.get("/", include_in_schema=False)
 def root():
-    return {"message": "Hello from FastAPI"}
+    return RedirectResponse("/docs")
 
 
 @app.get("/health", include_in_schema=False)

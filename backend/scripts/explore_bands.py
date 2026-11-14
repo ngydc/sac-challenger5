@@ -10,6 +10,7 @@ them on one north-up grid and writes
 The final API will look different; this is only to see what the data looks like.
 Uses the same pipeline as fetch_barnard.py (app/spherex.py), nothing new about the data format.
 
+Needs the cache database: `docker compose up -d db` from the repo root.
 Run from backend/:
     .venv\\Scripts\\python -m scripts.explore_bands                     # Barnard's Star, all bands
     .venv\\Scripts\\python -m scripts.explore_bands --target R_Dra --size 0.1
@@ -29,7 +30,7 @@ import numpy as np
 from astropy.time import Time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import spherex  # noqa: E402
+from app import db, spherex  # noqa: E402
 from scripts.survey_coverage import TARGETS, mover  # noqa: E402
 
 DETECTORS = [f"D{i}" for i in range(1, 7)]
@@ -78,10 +79,10 @@ def main() -> None:
 
     # 2. fetch (one retry pass: downloads fail intermittently) ----------------------------------
     center = at(np.mean([r.t_mid_mjd for r in recs]))
-    frames, failures = spherex.fetch_frames(chosen, center, args.size, at)
+    frames, failures = spherex.fetch_frames(chosen, center, args.size, at, cache=db.store)
     if failures:
         print(f"  retrying {len(failures)} failed downloads")
-        more, failures = spherex.fetch_frames([r for r, _ in failures], center, args.size, at)
+        more, failures = spherex.fetch_frames([r for r, _ in failures], center, args.size, at, cache=db.store)
         frames = sorted(frames + more, key=lambda f: f.record.t_mid_mjd)
     for r, err in failures:
         print(f"  FAILED {r.obs_id} {r.detector}: {err[:100]}")

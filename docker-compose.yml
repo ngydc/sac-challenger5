@@ -36,8 +36,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data # tables are created by the backend (backend/app/schema.sql)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -51,8 +50,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sac}:${POSTGRES_PASSWORD:-sac_password}@db:5432/${POSTGRES_DB:-sac}
     volumes:
-      - ./backend/app:/code/app
-      - ./backend/cache:/code/cache # SPHEREx cutout/coverage cache, kept across container rebuilds
+      - ./backend/app:/code/app # live reload; the SPHEREx cache is in the db service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:

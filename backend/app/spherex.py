@@ -181,6 +181,13 @@ def group_seasons(records: list[ImageRecord], gap_days: float = 30.0) -> list[li
 # --------------------------------------------------------------------------------------------
 # Fetch
 # --------------------------------------------------------------------------------------------
+class CutoutCache(Protocol):
+    """Where downloaded cutouts are kept, keyed by cutout_key(url) (app/db.py's Store implements this)."""
+
+    def cutout(self, key: str) -> bytes | None: ...
+    def put_cutout(self, key: str, url: str, data: bytes) -> None: ...
+
+
 class OutsideImageError(Exception):
     """IRSA returned HTTP 500: the cutout does not overlap the image (irsa-cutout-service.md)."""
 
@@ -305,14 +312,23 @@ def fetch_frames(
     center: SkyCoord,
     size_deg: float,
     target_at: Callable[[float], SkyCoord],
-    workers: int = 3,  # IRSA answers 503 "Server busy" when hit harder (see fetch_cutout_hdul)
+    workers: int = 3,  # IRSA answers 503 "Server busy" when hit harder (see download_cutout)
+    cache: "CutoutCache | None" = None,
 ) -> tuple[list[Frame], list[tuple[ImageRecord, str]]]:
     """Fetch and process cutouts in parallel. `target_at(mjd)` gives the target position at an
-    epoch (so moving targets get the right wavelength and flags). Returns (frames, failures)."""
+    epoch (so moving targets get the right wavelength and flags). With a `cache` (app/db.py's Store),
+    each cutout is downloaded only once, shared with the API. Returns (frames, failures)."""
 
     def one(rec: ImageRecord, client: httpx.Client):
         try:
-            with fetch_cutout_hdul(rec, center, size_deg, client) as hdul:
+            url = cutout_url(rec, center, size_deg)
+            key = cutout_key(url)
+            data = cache.cutout(key) if cache else None
+            if data is None:
+                data = download_cutout(rec, center, size_deg, client)
+                if cache:
+                    cache.put_cutout(key, url, data)
+            with fits.open(io.BytesIO(data)) as hdul:
                 return process(hdul, rec, target_at(rec.t_mid_mjd)), None
         except Exception as err:  # keep going; report failures to the caller
             return None, f"{type(err).__name__}: {err}"
