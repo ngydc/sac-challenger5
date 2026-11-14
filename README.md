@@ -1,2 +1,4 @@
 # sac-challenger5
-Daniel
+
+Teamname: CHALLENGER5
+Team members: Can, Duc, Daniel, Maximilian
