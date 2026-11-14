@@ -343,6 +343,7 @@ Marker ring on a picture shown at `scale`: `cx = (p.target.x + 0.5) * scale`, `c
 | 404 | `name_not_found` | Resolve: nobody knows the name. |
 | 404 | `unknown_frame` | No such image for this target. |
 | 404 | `outside_image` | The view lies outside this image. Permanent. |
+| 409 | `not_downloaded` | Image endpoint: rare timing case where the frame's download was reported finished but it is not readable yet. Retry the same request. |
 | 422 | `invalid_request` | A required parameter is missing or has the wrong type. |
 | 502 | `resolver_unavailable` | The name service did not answer. |
 | 502 | `upstream_error` / `irsa_unavailable` | IRSA failed or is down. Retry later. |
