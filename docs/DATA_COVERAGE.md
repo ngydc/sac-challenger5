@@ -169,7 +169,7 @@ Results:
 - **The star's measured position** in each season stack lies within **0.05–0.4 px** of the position predicted from its proper motion.
 - **Total motion:** 9.7″ between the first and last season, against 10.3″ expected.
 - **Saturation:** in D2 the star is saturated. Every frame has `OVERFLOW`, `SUR_ERROR` and `BLOOM` set on the star, so a simple centroid failed by about 2 px. A 2D Gaussian fit that skips masked pixels works. Expect the same for any bright target, and for photometry or spectra.
-- **Downloads:** they fail intermittently. On the first run 2 of 24 cutouts failed (one with a `MemoryError`), and both worked on retry. The code reports failures and continues.
+- **Downloads fail because IRSA rate-limits (tested).** The cutout service answers `503 Server busy, retry later.` (25 bytes), often right after it has served one request. With 6 parallel workers and 3 quick retries, 102 of 349 cutouts failed on the first pass. With 3 workers and exponential backoff (5 s, 10 s, 20 s … up to 60 s, or the server's `Retry-After`) the 25 missing cutouts took 214 s (about 9 s each, mostly waiting on 503s), and 24 of them arrived on the first pass, the last on the retry pass. The first full pass (349 requested, 6 workers, short retries) took 784 s. The API must therefore limit its concurrency towards IRSA, back off on 503, and cache every successful cutout. We did not measure how many requests per minute IRSA tolerates, so that limit is still unknown.
 
 Outputs: `backend/out/barnard/` (`blink_seasons.gif`, `frames.png`, `summary.json`). This folder is git-ignored.
 
@@ -183,7 +183,12 @@ From `backend/`, with the virtual environment from `requirements.txt`:
 .venv\Scripts\python -m scripts.survey_coverage                   # all five targets -> backend/out/coverage/
 .venv\Scripts\python -m scripts.survey_coverage --targets R_Dra    # one target
 .venv\Scripts\python -m scripts.fetch_barnard --detector D6 --size 0.08
+.venv\Scripts\python -m scripts.explore_bands                      # temporary: every frame of every band -> backend/out/explore_<target>/viewer.html
 ```
+
+`explore_bands` builds a self-contained HTML viewer (band tabs, a time slider over observing seasons, a wavelength slider, a clickable coverage map; state can be given in the URL, e.g. `viewer.html#det=D5&t=1&w=4.2`) and one contact sheet per band (`frames_D1..D6.png`, one row per season, frames ordered by wavelength). For Barnard's Star it uses 349 cutouts and a 0.08° (47×47 px) field. It is for looking at the data only; the final API will look different.
+
+**What the viewer showed:** Barnard's Star is saturated in several bands. Its core pixels carry `OVERFLOW`, `SUR_ERROR`, `BLOOM` (and sometimes `TRANSIENT`), and because `TRANSIENT` is in our bad-pixel list the core is blanked, so the target looks like a hole. For a blink tool the masking policy needs a decision: show saturated pixels (with a marker) instead of hiding them.
 
 The first run downloads the six wavelength maps (about 200 MB) into `backend/cache/calib/`. Later runs reuse them. `coverage.csv` has one row per image (target, obs_id, detector, collection, time, pixel position, wavelength, bandwidth, edge distance, `access_url`). Use it to explore further.
 
