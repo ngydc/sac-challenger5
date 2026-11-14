@@ -193,6 +193,13 @@ def cutout_url(record: ImageRecord, center: SkyCoord, size_deg: float) -> str:
     return f"{record.access_url}?center={center.ra.deg:.7f},{center.dec.deg:.7f}&size={size_deg:.5f}"
 
 
+def cutout_path(record: ImageRecord, center: SkyCoord, size_deg: float) -> Path:
+    """Where the cached (PSF-stripped) copy of this cutout lives. Deterministic, so callers can
+    check `.exists()` to know whether a download is needed. The URL contains the file version and
+    processing date, so a reprocessed image gets a new path and a cached copy never goes stale."""
+    return CACHE_DIR / f"{hashlib.sha1(cutout_url(record, center, size_deg).encode()).hexdigest()}.fits"
+
+
 def fetch_cutout_hdul(
     record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client, retries: int = 6
 ) -> fits.HDUList:
@@ -202,7 +209,7 @@ def fetch_cutout_hdul(
     2026-11-14: with 6 parallel workers ~30% of cutouts hit this). So a 503 waits and retries with
     exponential backoff (or the server's Retry-After), instead of failing after a few seconds."""
     url = cutout_url(record, center, size_deg)
-    path = CACHE_DIR / f"{hashlib.sha1(url.encode()).hexdigest()}.fits"
+    path = cutout_path(record, center, size_deg)
     if path.exists():
         return fits.open(path)
 
@@ -413,7 +420,10 @@ class Exposure:
 
 
 def locate_on_detector(
-    records: list[ImageRecord], target_at: Callable[[float], SkyCoord], workers: int = 16
+    records: list[ImageRecord],
+    target_at: Callable[[float], SkyCoord],
+    workers: int = 16,
+    on_progress: Callable[[int, int], None] | None = None,  # called as (done, total) after each image
 ) -> tuple[list[Exposure], list[tuple[ImageRecord, str]]]:
     """For every image: target pixel (exact header WCS) and wavelength there (CWAVE map)."""
     with httpx.Client(timeout=120, follow_redirects=True) as client:
@@ -434,8 +444,17 @@ def locate_on_detector(
             except Exception as err:
                 return None, f"{type(err).__name__}: {err}"
 
+        done = [0]
+
+        def tracked(rec: ImageRecord):
+            out = one(rec)
+            done[0] += 1
+            if on_progress:
+                on_progress(done[0], len(records))
+            return out
+
         with ThreadPoolExecutor(workers) as ex:
-            results = list(ex.map(one, records))
+            results = list(ex.map(tracked, records))
     found = [e for e, _ in results if e is not None]
     failed = [(r, err) for r, (e, err) in zip(records, results) if e is None]
     return sorted(found, key=lambda e: e.record.t_mid_mjd), failed

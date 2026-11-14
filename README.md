@@ -12,6 +12,7 @@ Challenge: https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spher
 
 - [Project overview](docs/PROJECT_OVERVIEW.md): goal, test targets, features, risks, MVP checklist
 - [Resources](docs/RESOURCES.md): SPHEREx data format, how to get the data from IRSA, test results
+- [Backend API](docs/API.md): the endpoints the frontend uses (sliders, frames), with live docs at `/docs` when the backend runs
 
 ## Stack
 

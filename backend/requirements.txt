@@ -6,3 +6,4 @@ astropy>=7.0,<8
 astroquery>=0.4.10
 reproject>=0.14
 matplotlib>=3.9,<4
+pillow>=10
