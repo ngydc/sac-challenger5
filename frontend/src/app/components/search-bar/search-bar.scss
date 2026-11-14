@@ -1,0 +1,46 @@
+:host {
+  display: block;
+  width: min(560px, 100%);
+}
+
+form {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.3rem 0.3rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--overlay);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+
+  &:focus-within {
+    border-color: var(--slider);
+  }
+}
+
+svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+.btn {
+  min-height: 34px;
+  border-radius: 999px;
+  min-width: 64px;
+}
