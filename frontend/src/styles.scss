@@ -1,9 +1,23 @@
-/* Global styles */
+/* Global styles and color tokens (dark theme). Shared controls live here to keep component styles small. */
 :root {
   --bg: #0b0d12;
   --fg: #e6e8ee;
   --muted: #8a90a0;
-  --border: #23262f;
+  --border: #2a2e38;
+  --surface: #15181f;
+  --surface-2: #1d212a;
+  --overlay: rgb(11 13 18 / 0.78);
+  --accent: #22b07d;
+  --accent-soft: rgb(34 176 125 / 0.16);
+  --slider: #2f7cf6;
+  --ring: #ff4d4d;
+  --warn: #f2b84b;
+  --danger: #ff6b6b;
+  --no-data: #3a4256;
+  --masked: #8b1a1a;
+  --radius: 10px;
+  --shadow: 0 8px 30px rgb(0 0 0 / 0.45);
+  --drawer-w: 400px;
   color-scheme: dark;
 }
 
@@ -16,7 +30,145 @@
 html,
 body {
   margin: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--slider);
+  outline-offset: 2px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 40px;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover:not(:disabled) {
+    background: #262b36;
+  }
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  &.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  &.icon {
+    width: 40px;
+    padding: 0;
+  }
+}
+
+/* ---- range slider (thumb like the reference design) ---- */
+input[type='range'] {
+  --pct: 0%;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+
+  &::-webkit-slider-runnable-track {
+    height: 5px;
+    border-radius: 3px;
+    background: linear-gradient(to right, var(--slider) var(--pct), #d8dbe2 var(--pct));
+  }
+  &::-moz-range-track {
+    height: 5px;
+    border-radius: 3px;
+    background: linear-gradient(to right, var(--slider) var(--pct), #d8dbe2 var(--pct));
+  }
+  &::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -9.5px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #5b6170;
+    appearance: none;
+  }
+  &::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #5b6170;
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+select,
+input[type='number'],
+input[type='search'] {
+  min-height: 36px;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+}
+
+input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgb(255 255 255 / 0.2);
+  border-top-color: var(--fg);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

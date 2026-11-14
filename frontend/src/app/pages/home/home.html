@@ -1,2 +1,79 @@
-<h1>SPHEREx Blink</h1>
-<p class="muted">Frontend is running. Features will be added here.</p>
+<div class="layout" [class.open]="menuOpen()">
+  <main class="stage">
+    <app-viewer />
+
+    <header class="top">
+      <span class="brand">SPHEREx Blink</span>
+      <app-search-bar />
+    </header>
+
+    @if (s.phase() === 'ready') {
+      <div class="hud">
+        <button type="button" class="btn icon" aria-label="Previous season" (click)="s.stepVisit(-1)" [disabled]="s.visit() === 0">‹</button>
+        <button
+          type="button"
+          class="btn play"
+          [class.active]="s.playing() === 'time'"
+          [attr.aria-label]="s.playing() === 'time' ? 'Stop blinking' : 'Blink through time'"
+          (click)="s.toggle('time')"
+        >
+          {{ s.playing() === 'time' ? '❚❚' : '▶' }}<span class="lbl">blink</span>
+        </button>
+        <button type="button" class="btn icon" aria-label="Next season" (click)="s.stepVisit(1)" [disabled]="s.visit() >= s.visits().length - 1">›</button>
+        <div class="info" aria-live="polite">
+          <strong>{{ (s.picture()?.wavelength ?? s.wavelength()) | number: '1.3-3' }} µm</strong>
+          <span>season {{ s.visit() + 1 }}/{{ s.visits().length }}
+            @if (s.picture(); as p) { · {{ p.time | date: 'yyyy-MM-dd' : 'UTC' }} }
+          </span>
+        </div>
+        <button type="button" class="btn icon fs" aria-label="Full screen" (click)="toggleFullscreen()">⛶</button>
+      </div>
+    }
+
+    <button
+      type="button"
+      class="btn toggle"
+      [class.active]="menuOpen()"
+      aria-controls="controls"
+      [attr.aria-expanded]="menuOpen()"
+      (click)="menuOpen.set(!menuOpen())"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
+      <span class="lbl">Controls</span>
+    </button>
+  </main>
+
+  <aside id="controls" class="drawer" [inert]="!menuOpen()" aria-label="Controls">
+    <div class="drawer-inner">
+    <div class="drawer-head">
+      <div>
+        <h2>{{ s.resolved()?.target?.name ?? (s.resolved() ? 'Coordinates' : 'Controls') }}</h2>
+        @if (s.target(); as t) {
+          <p class="muted">RA {{ t.ra | number: '1.4-4' }}°, Dec {{ t.dec | number: '1.4-4' }}° · {{ t.fov }}° field · north up</p>
+        }
+        @if (s.resolved(); as r) {
+          @if (r.target.note) {
+            <p class="muted">{{ r.target.note }}</p>
+          }
+          @for (w of r.warnings; track $index) {
+            <p class="warn">{{ w }}</p>
+          }
+        }
+      </div>
+      <button type="button" class="btn icon" aria-label="Close controls" (click)="menuOpen.set(false)">✕</button>
+    </div>
+
+    @if (s.phase() === 'ready') {
+      <app-control-panel />
+    } @else {
+      <p class="muted">Search for an object first. The sliders appear when its images are known.</p>
+    }
+
+    <footer class="ack">
+      Uses data products from SPHEREx, a joint project of the Jet Propulsion Laboratory and the
+      California Institute of Technology, funded by NASA. Data via
+      <a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener">IRSA</a>.
+    </footer>
+    </div>
+  </aside>
+</div>
