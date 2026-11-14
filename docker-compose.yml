@@ -12,6 +12,8 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules # keep the container's Linux node_modules, don't use the host's
+    depends_on:
+      - backend # the dev server proxies /api to it
     restart: unless-stopped
 
   frontend-prod:
@@ -21,6 +23,9 @@ services:
       target: prod
     ports:
       - "8080:80"
+    depends_on:
+      - backend # nginx proxies /api to it
+    restart: unless-stopped
 
   db:
     image: postgres:17
@@ -47,10 +52,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sac}:${POSTGRES_PASSWORD:-sac_password}@db:5432/${POSTGRES_DB:-sac}
     volumes:
       - ./backend/app:/code/app
+      - ./backend/cache:/code/cache # SPHEREx cutout/coverage cache, kept across container rebuilds
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
