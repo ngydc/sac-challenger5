@@ -1,0 +1,242 @@
+# Frontend: SPHEREx Blink
+
+Documentation for the Angular frontend. It covers only the frontend; the backend (FastAPI, IRSA access, caching, image processing) is documented in [`backend/`](../backend/) and the [README](../README.md).
+
+> **Living document.** Features and details will be added and changed during the project. Each feature has an ID (`F1`, `F2`, ...) and a status so changes are easy to track. Update this file when the frontend changes.
+
+## Contents
+
+1. [Purpose](#1-purpose)
+2. [Tech stack](#2-tech-stack)
+3. [Architecture](#3-architecture)
+4. [Features](#4-features)
+5. [Interface to the backend](#5-interface-to-the-backend)
+6. [Design and UX rules](#6-design-and-ux-rules)
+7. [Development](#7-development)
+8. [Conventions](#8-conventions)
+9. [Open questions](#9-open-questions)
+10. [Changelog](#10-changelog)
+
+---
+
+## 1. Purpose
+
+The frontend **visualizes the data the backend delivers**. The backend fetches SPHEREx images from IRSA, processes them and sends ready-to-display images; the frontend shows the image for the selected point in time and wavelength. Moving the time slider steps through the observations of the searched object, so moving or varying objects become visible.
+
+The frontend does **not** talk to IRSA, read FITS files or compute image data. All data comes from the backend via `/api/...`.
+
+The **visualization is the main focus** of the UI: it fills the screen, all controls are secondary and can be hidden.
+
+## 2. Tech stack
+
+Taken from [`package.json`](package.json), [`angular.json`](angular.json) and the Docker files.
+
+| Area | Tool | Version / notes |
+|---|---|---|
+| Framework | Angular | 22.2 (standalone components, no NgModules) |
+| Language | TypeScript | ~6.0 |
+| Styles | SCSS | global styles in `src/styles.scss`, one `.scss` per component |
+| Reactive data | RxJS | ~7.8 |
+| HTTP | Angular `HttpClient` | with `withFetch()` (Fetch API) |
+| Routing | Angular Router | lazy-loaded pages (`loadComponent`) |
+| Build / dev server | `@angular/build` (Angular CLI 22.2.7) | application builder, dev server with proxy |
+| Unit tests | Vitest 5 + jsdom | run with `ng test` |
+| Formatting | Prettier 3.8 | `printWidth: 100`, single quotes, Angular parser for HTML |
+| Editor | `.editorconfig` | 2 spaces, UTF-8, single quotes in TS |
+| Container (dev) | Node 24 Alpine | `ng serve` with live reload (polling for Windows bind mounts) |
+| Container (prod) | nginx 1.28 Alpine | serves the static build, forwards `/api` |
+| Runtime requirement | Node.js | 22.22+ or 24.15+ |
+
+No UI component library and no image/astronomy library are installed yet. If one is added (e.g. for sliders or Aladin Lite for overlays), list it here.
+
+## 3. Architecture
+
+### 3.1 Overview
+
+```
+Browser
+  └── Angular app (SPHEREx Blink)
+        ├── App shell (header + <router-outlet>)
+        ├── Pages (routed, lazy-loaded)
+        │     └── Home  → viewer, slider panel, object search
+        ├── Components (reusable UI parts)
+        └── Core (app-wide config and services)
+              └── API_BASE_URL = '/api'
+                     │
+                     ▼  relative /api/... calls
+        Dev:  Angular dev server proxy (proxy.conf.mjs) ─┐
+        Prod: nginx (nginx.conf) ────────────────────────┴─► Backend (FastAPI)
+```
+
+The frontend never knows the backend's host. It only calls relative `/api/...` paths:
+- **Development:** [`proxy.conf.mjs`](proxy.conf.mjs) forwards `/api` to `http://localhost:8000` (in Docker: `API_TARGET=http://backend:8000`).
+- **Production:** [`nginx.conf`](nginx.conf) forwards `/api/` to `http://backend:8000` and falls back to `index.html` for all other paths (Angular routing).
+
+### 3.2 Folder structure
+
+Current state, plus the planned folders (marked *planned*).
+
+```
+frontend/
+  src/
+    index.html             page shell, title "SPHEREx Blink"
+    main.ts                bootstraps the App with appConfig
+    styles.scss            global styles and color tokens (dark theme)
+    app/
+      app.ts/.html/.scss   app shell: header with title, <main> with router outlet
+      app.config.ts        providers: error listeners, router, HttpClient (fetch)
+      app.routes.ts        '' → Home (lazy), '**' → redirect to ''
+      core/
+        api.config.ts      API_BASE_URL = '/api'
+        services/          planned: API services (images, object search), view state
+        models/            planned: TypeScript types for backend responses
+      pages/
+        home/              main page (currently a placeholder)
+      components/          planned: viewer, slider-panel, object-search
+  public/                  static assets (favicon)
+  proxy.conf.mjs           dev proxy for /api
+  nginx.conf               prod server config
+  Dockerfile               targets: deps, dev, build, prod
+```
+
+### 3.3 Architecture rules
+
+- **Standalone components** only; each component has its own `.ts`, `.html` and `.scss`.
+- **Pages** (`pages/`) are routed and lazy-loaded; **components** (`components/`) are reusable building blocks without routing.
+- **All backend calls go through services in `core/`**, never directly from components, and always use `API_BASE_URL`.
+- **Shared state** (searched object, selected point in time, selected wavelength, current image) lives in a service, so viewer, sliders and search stay in sync. Angular signals are the preferred tool for this state; RxJS for HTTP streams.
+- **No science logic in the frontend.** Which images form a frame, how they are stretched and colored is decided by the backend. The frontend only sends parameters and displays the result.
+- **No hard-coded data values.** Values that depend on the data (which points in time exist for an object, the wavelength in µm of each channel) come from the backend, because they change between SPHEREx releases and between objects.
+
+## 4. Features
+
+Status: **planned** (agreed, not built), **in progress**, **done**. New features get the next free ID.
+
+| ID | Feature | Status |
+|---|---|---|
+| F1 | Full-screen visualization | planned |
+| F2 | Time slider (points in time of the searched object) | planned |
+| F3 | Wavelength slider (values 1-102) | planned |
+| F4 | Object search | planned |
+| F5 | Responsive web design | planned |
+
+F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. a side drawer or overlay) that is closed or small by default, so the visualization stays the focus. The menu is built so that more controls can be added later.
+
+### F1: Full-screen visualization
+
+- Shows the image from the backend for the **selected point in time (F2)** and **selected wavelength (F3)**.
+- The visualization takes up the **whole available screen**; it is the main element of the app. All other UI elements (slider menu, search) are placed on top of it or beside it and must not shrink it permanently.
+- Optional: a real full-screen mode via the browser Fullscreen API.
+- Shows a loading state while an image is being fetched and an error message if the backend returns no data (the backend can take several seconds per image).
+
+### F2: Time slider
+
+- A slider over the **points in time (observations) available for the searched object**, ordered by observation time.
+- Each slider position is one point in time; moving the slider shows the image of that observation in F1.
+- Shows the current value as a readable date (and the position, e.g. `3 / 11`).
+- The list of points in time comes from the backend after an object search (F4); it differs from object to object and is not hard-coded. The slider is disabled until an object has been searched.
+
+### F3: Wavelength slider
+
+- A slider with **102 steps (values 1 to 102)**, one per SPHEREx spectral channel (6 detectors × 17 channels).
+- Moving the slider shows the image at that wavelength in F1.
+- Shows the selected value; if the backend provides it, also the wavelength in µm for that channel (the µm values are not hard-coded in the frontend).
+
+**Notes for both sliders:**
+- Changes are sent to the backend as parameters; to avoid a request on every pixel of slider movement, requests should be debounced or sent on release.
+- Both sliders must work with mouse, touch and keyboard (arrow keys move one step).
+
+### F4: Object search
+
+- A search bar where the user types an object name, e.g. `Barnard's Star`.
+- The frontend sends the name to the backend; the **backend** finds the matching coordinates/parameters and returns them.
+- The frontend then loads the available points in time for the time slider (F2) and shows the first image in F1.
+- Handles "not found" and errors with a clear message. Optional later: suggestions while typing, recent searches.
+
+### F5: Responsive web design
+
+- The app works on desktop, tablet and phone.
+- The visualization always uses the available space and keeps its aspect ratio.
+- On small screens the slider menu opens as an overlay or bottom sheet instead of a side bar; controls are large enough for touch.
+- Sliders and the search bar must work with mouse, touch and keyboard.
+
+### Possible later features
+
+From [`docs/PROJECT_OVERVIEW.md`](../docs/PROJECT_OVERVIEW.md) (sections 3-4). Not decided yet; move them into the table above when they are planned.
+
+- URL parameters for sharing a view (`?ra=...&dec=...&fov=...`)
+- Adjustable field of view (FOV)
+- Overlays from other surveys (Gaia DR3, WISE, e.g. with Aladin Lite)
+- Metadata display (observation dates, flags)
+- Difference images / comparing epochs
+- Spectrum for a clicked source
+
+## 5. Interface to the backend
+
+The frontend only depends on the backend through HTTP calls under `/api`. The exact endpoints and response formats are **not defined yet** and must be agreed with the backend team. Document them here once they are fixed.
+
+What the frontend needs from the backend:
+
+| Needed for | Frontend sends | Frontend expects |
+|---|---|---|
+| F4 | an object name | the coordinates (RA/Dec) and any other parameters, or "not found" |
+| F2 | the searched object (or its coordinates) | the list of available points in time (observation dates) |
+| F1 | object, selected point in time (F2), selected wavelength channel 1-102 (F3) | the image to display (image URL or image data) |
+| F3 | – | optional: the wavelength in µm for each channel 1-102 |
+
+Rules:
+- All paths start with `/api` (see `API_BASE_URL` in [`core/api.config.ts`](src/app/core/api.config.ts)).
+- Response types are written down as TypeScript interfaces in `core/models/`.
+
+## 6. Design and UX rules
+
+- **Visualization first:** controls are secondary and can be collapsed.
+- **Dark theme** (suits sky images). Colors are CSS variables in [`styles.scss`](src/styles.scss): `--bg`, `--fg`, `--muted`, `--border`. New colors are added there as variables, not hard-coded in components.
+- Font: system font stack (`system-ui`, `Segoe UI`, `Roboto`, ...).
+- Clear loading and error states; never a blank screen without explanation.
+- Accessible: keyboard operable, visible focus, labels for all sliders and inputs.
+- Component styles stay small (build budget: warning at 4 kB, error at 8 kB per component style). Shared styles go into `styles.scss`.
+
+## 7. Development
+
+From the `frontend/` folder:
+
+```bash
+npm install
+npm start          # dev server at http://localhost:4200, /api is proxied to localhost:8000
+npm run build      # production build into dist/frontend/browser
+npm run watch      # development build in watch mode
+npm test           # unit tests (Vitest)
+```
+
+With Docker (from the repository root):
+
+```bash
+docker compose up --build                                  # dev server with live reload: http://localhost:4200
+docker compose --profile prod up --build frontend-prod     # production build via nginx: http://localhost:8080
+```
+
+The frontend starts without the backend, but all `/api` calls fail until the backend runs.
+
+## 8. Conventions
+
+- Component selector prefix: `app-` (from `angular.json`).
+- Formatting with Prettier (`.prettierrc`); 2-space indentation (`.editorconfig`).
+- Strict TypeScript compiler options (`noImplicitReturns`, `noImplicitOverride`, `noPropertyAccessFromIndexSignature`, ...).
+- Unit tests next to the code as `*.spec.ts`.
+- Generate new parts with the CLI, e.g. `ng generate component components/viewer`.
+
+## 9. Open questions
+
+- Endpoints and response format of the backend (section 5).
+- Image format delivered by the backend (e.g. PNG/JPEG per image).
+- What happens if there is no image for a combination of point in time and wavelength (SPHEREx sees a spot with only 2 of 6 detectors per pointing): hide the value, disable it, or show a message?
+- Layout of the slider menu: side drawer vs. overlay on desktop.
+- Whether a UI library is used for sliders and the panel, or plain Angular components.
+
+## 10. Changelog
+
+| Date | Change |
+|---|---|
+| 2026-11-14 | First version: architecture, tech stack, features F1-F5. |
+| 2026-11-14 | Video player removed. Sliders reduced to two: time slider (F2) and wavelength slider 1-102 (F3); RGB, band count, RA and Dec sliders removed. |
