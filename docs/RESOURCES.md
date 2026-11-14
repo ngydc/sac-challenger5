@@ -123,6 +123,87 @@ This is the unusual part, and it matters for our tool.
 DOIs for citing: QR1 `10.26131/IRSA629`, QR2 `10.26131/IRSA652`, QR3 `10.26131/IRSA662`. The data policy asks for this acknowledgement:
 > "This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration."
 
+### Technical summary (planning tables)
+
+Checked on 2026-11-14 against IRSA: SIA2 searches (collections `spherex_dr1`, `spherex_qr3` and their `_deep` versions) at the five test targets, plus the headers and pixels of one real cutout (D2, Barnard's Star, `size=0.1`). Items marked *(derived)* are our own arithmetic from those numbers.
+
+**A. What is the same in every image**
+
+| Property | Value | Source |
+|---|---|---|
+| Instrument / facility | `SPHEREx` / `SPHEREx` for all 3,900+ images found. Single instrument, no other missions mixed in | SIA2 |
+| Product | Level 2 spectral image, one exposure (`calib_level` 2, `dataproduct_subtype` science, `obs_intent` science). All from the survey "SPHEREx LVF Survey Data" | SIA2 |
+| Detector arrays | 6 H2RG arrays, 2040 × 2040 light-sensitive pixels each. D1–D3 are short-wave (SWIR), D4–D6 mid-wave (MWIR) | `DETECTOR` header, SIA2 |
+| Pixel scale | 6.15″ per pixel. Median pixel solid angle 37.7 arcsec² | SIA2 `s_pixel_scale`, `OMEGA_MEDIAN` |
+| Footprint of one image | 3.485° (`s_fov`), about 3.5° × 3.5° | SIA2 |
+| Exposure time | 113.58 s (`XPOSURE`), 118.2 s elapsed. Identical in every image checked | SIA2 `t_exptime`, header |
+| Pixel unit and type | Surface brightness in **MJy/sr**, float32 (`BUNIT`). Zodiacal light **not** subtracted | header |
+| Sky WCS | ICRS, `RA---TAN-SIP` (TAN projection plus SIP distortion terms). Read with `astropy.wcs.WCS` | header |
+| Time stamps | UTC. `MJD-BEG`, `MJD-AVG`, `MJD-END`, with `DATE-AVG` as the mid-exposure time. SIA2 `t_min`/`t_max` are in MJD (confirmed: 60908.98 matches `DATE-OBS` 2025-08-21) | header, SIA2 |
+| HDUs | `IMAGE`, `FLAGS`, `VARIANCE`, `ZODI` (all float32 or int32), `EPSF` (binary table), `WCS-WAVE` (binary table) | file |
+| File size | Full file 57–68 MB. A 0.1° cutout is **4.0 MB**, of which `EPSF` is 3.86 MB. Each image layer of a 59 × 59 cutout is only 13.9 KB | SIA2 `access_estsize`, file |
+| Cutout size | `size=0.1` gave a **59 × 59** pixel cutout here (58 × 59 earlier). Plan on ±1 pixel | tested |
+
+**B. What differs between images**
+
+| Property | How it varies | Consequence for the tool |
+|---|---|---|
+| **Detector / band** | An image is from one of D1–D6, so its wavelength range is fixed by the detector (table C) | Never mix detectors in one blink sequence without saying so |
+| **Wavelength inside an image** | Changes along the array's y axis at about **0.00028 µm per pixel** (D2 example, derived). In our D2 cutout it ran from 1.095 to 1.108 µm, with a bandwidth of about 0.025 µm. Only a weak, curved dependence along x | Over a ~10′ field (~100 px) the shift is about one bandwidth. Over 30′ it is about 3. Use **one wavelength per frame, taken at the target**, and warn when a large field is used |
+| **Which detectors cover a position** | Each pointing places the target on only **one of three detector pairs: D1+D4, D2+D5 or D3+D6** (the two arrays in a pair see nearly the same sky at once through the dichroic, offset by about 0.02°). Of about 2,000 pointings at our five targets, 97% gave a pair and 3% only one array. None gave more than 2. Pair frequency: D3+D6 41%, D1+D4 39%, D2+D5 17% | A given epoch gives you **2 bands, not 6**. Which pair you get depends on where the target falls relative to the boresight, and it varies by target (R Dra has far fewer D2/D5 images) |
+| **Pointing and pixel grid** | Every exposure has its own boresight, so the footprint centre and the target's pixel position change. Each image has its own WCS | Frames are **not aligned**. Reproject all cutouts to one common WCS (e.g. `reproject`, or a client-side warp) before blinking, or the target will jump for the wrong reason |
+| **Observation time** | 2025-04-24 to 2026-10-02 at the time of checking. Exposures of one position cluster in short visit windows (a day or a few days), then nothing for weeks to months | See table D. Group by visit window, not by image |
+| **Release** | `spherex_dr1` and `spherex_qr3` (and `_deep`). Filenames show the same pipeline version (`v27`) but different processing dates. IRSA says DR1 + QR3 form one uniformly processed set | Query both. Record the collection in the metadata panel |
+| **PSF width** | `PSF_FWHM` is stored per image. 7.46″ for the one image we read | The PSF is about 1.2 px wide (FWHM), so a mover is blurred over a couple of pixels |
+| **Quality and contamination** | Per-image header counters (`N_PERSIST`, `N_SNOWBALL`, `L2DQAFLG`, `SATSTRKS`, and so on) and the `FLAGS` bit map. In the cutout, bit 21 was set on 3,478 of 3,481 pixels. This is probably the SOURCE flag, because the header says 94.9% of the image carries it **(inferred)** | Do **not** mask on "any flag set". Look up each bit in the Explanatory Supplement (Table 16) first |
+| **Background** | `ZODI` was a flat 0.152 MJy/sr over the cutout, against an image median of 0.43 MJy/sr. It changes with date and sky position | Subtract `ZODI` before stretching, or frames from different dates will look different even with no change in the sky |
+| **Bad pixels** | 3 of 3,481 pixels were NaN in `IMAGE` and `VARIANCE`. The brightest star pixel was 1,876 MJy/sr, against a typical 0.2–2 | Use a robust (percentile or asinh) stretch, and handle NaN |
+
+**C. The six bands**
+
+SIA2 reports the full wavelength coverage of each array, which is a little wider than the nominal ranges in the earlier band table. Neighbouring arrays overlap slightly.
+
+| Detector | Type | Wavelength range from SIA2 (µm) | Resolving power R | Typical bandwidth |
+|---|---|---|---|---|
+| D1 | SWIR | 0.7455 – 1.1167 | 39.1 | ~0.02 µm at 0.9 µm *(derived: λ/R)* |
+| D2 | SWIR | 1.1033 – 1.6499 | 41.4 | 0.025–0.040 µm (measured in the WCS-WAVE table) |
+| D3 | SWIR | 1.6301 – 2.4346 | 40.6 | ~0.05 µm at 2 µm *(derived)* |
+| D4 | MWIR | 2.4027 – 3.8473 | 34.9 | ~0.09 µm at 3.1 µm *(derived)* |
+| D5 | MWIR | 3.8113 – 4.4300 | 111.6 | ~0.04 µm at 4.1 µm *(derived)* |
+| D6 | MWIR | 4.4115 – 5.0096 | 127.8 | ~0.04 µm at 4.7 µm *(derived)* |
+
+The bandpass name in queries is `SPHEREx-D1` … `SPHEREx-D6`. Each detector has 17 channels (102 in total).
+
+**D. Coverage at the five test targets**
+
+Cone search of 0.01° at the late-2026 positions from the overview, all four collections. "Visit windows" are groups of exposures of one detector less than 2 days apart, so they approximate separate epochs. The last column is our estimate of the motion across the whole available baseline *(derived: proper motion × baseline ÷ 6.15″)*.
+
+| Target | Images found | Per detector (D1 / D2 / D3 / D4 / D5 / D6) | Collections | Date range | Visit windows (D1 / D4 / D6) | Total motion over the baseline |
+|---|---|---|---|---|---|---|
+| Barnard's Star | 363 | 60 / 61 / 61 / 59 / 62 / 60 | DR1 239, QR3 124 | 2025-08 → 2026-09 | 7 / 7 / 11 | 1.1 yr × 10.4″/yr ≈ 11″ ≈ **1.9 px** |
+| Epsilon Indi B | 467 | 48 / 93 / 99 / 46 / 86 / 95 | DR1 347, QR3 120 | 2025-04 → 2026-10 | 10 / 10 / 10 | 1.4 yr × 4.7″/yr ≈ 6.7″ ≈ **1.1 px** |
+| WISE 0855 | 258 | 36 / 48 / 45 / 36 / 48 / 45 | DR1 258, QR3 0 | 2025-05 → 2026-05 | 4 / 4 / 8 | 1.0 yr × 8.2″/yr ≈ 8.2″ ≈ **1.3 px** |
+| RW Aurigae | 336 | 56 per detector | DR1 226, QR3 110 | 2025-09 → 2026-09 | 5 / 5 / 5 | none (static). Variability only |
+| R Draconis | 2,514 | 586 / 92 / 576 / 588 / 93 / 579 | DR1 422, QR3 126, plus **DR1 deep 1,233 and QR3 deep 733** | 2025-04 → 2026-09 | 27 / 27 / 23 | none (static). Variability only |
+
+Some detector counts of one pair differ by a few images (one array of a pair missing in some pointings).
+
+**E. What this means for planning our features**
+
+| Planned feature | Finding that affects it |
+|---|---|
+| **Blink player (MVP)** | Total motion across the whole mission so far is only **1–2 pixels** for the three movers, and the PSF is already ~1.2 px wide. A raw blink will be subtle. Plan for good stretch controls, a visit-window-averaged frame, and difference images early, not as extras |
+| **What is a frame** | Use **one frame per visit window, within one detector** (take one exposure, or co-add the minutes-apart exposures of the window if the download budget allows). That gives roughly 4–10 frames per mover target (Barnard 7, Epsilon Indi 10, WISE 0855 4–8), 5 for RW Aur and 25+ for R Dra |
+| **Band handling and co-adds** | Co-add **within one detector**. Do not co-add across detectors: the wavelengths are very different, and brown dwarfs and comets change brightness strongly with wavelength. Offer a "same detector only" blink, and let the user pick the detector. Since a position is seen by only one pair per pointing, expect some detectors to have fewer windows than others |
+| **Field of view** | Wavelength shifts ~0.0003 µm per pixel along y. Keep the default field ≤10′ and show the wavelength per frame. A 10′ field is ~100 px, so a cutout is about 100 × 100 px (~38 KB per layer) |
+| **Alignment** | Cutouts come on different pixel grids. A reprojection step on the backend is **required**, not optional |
+| **Epsilon Indi B pair** | Ba and Bb are ~1–2″ apart against a 7.5″ PSF, so they are unresolved. Do not promise to separate them |
+| **R Dra performance** | Our query returned 2,514 images because R Dra sits in the deep field. Cap how many frames are fetched (e.g. latest N per detector, or pick one window per month) and let the user widen it |
+| **WISE 0855 coverage** | Only DR1 images so far (no QR3 at this position when we checked), ending 2026-05. Centre each frame on the target's position **at that image's date**, not on the late-2026 position |
+| **Latency and size** | **Every exposure is its own ~4 MB, ~10 s download**, though the useful data in it is ~55 KB. One detector at Barnard's Star is ~60 images, about 240 MB from IRSA. All six detectors is 363 images, about 1.4 GB. So default to **one detector** and/or **one exposure per visit window**, fetch in parallel, drop `EPSF`, and cache. Offer "load more" for the rest |
+| **Metadata display** | Per-image values worth showing: date (`DATE-AVG`), detector, wavelength at the target, `PSF_FWHM`, `L2DQAFLG`, collection and observation ID. All are in the header or SIA2 result |
+| **Updating with new releases** | Collection names and `v27` change. Read the collection list and file names from the SIA2 result, never hard-code them |
+
 ---
 
 ## 3. How to get the data
@@ -162,7 +243,7 @@ Append `center` and `size` (degrees) to an `access_url`:
 curl -o cutout.fits "https://irsa.ipac.caltech.edu/ibe/data/spherex/qr3/level2/2026W21_2A/l2b-v27-2026-268/1/level2_2026W21_2A_0001_2D1_spx_l2b-v27-2026-268.fits?center=337.8783221,-5.1891588&size=0.1"
 ```
 - The cutout is a full multi-extension FITS: the same six HDUs, with `IMAGE`, `FLAGS`, `VARIANCE` and `ZODI` cropped, `WCS-WAVE` adjusted to the cutout, and the PSF HDU left **whole**.
-- `size=0.1` gave a 58 × 59 pixel image **(tested)**: 0.1° is 360″, and 360″ / 6.15″ ≈ 58 pixels.
+- `size=0.1` gave a 58 × 59 pixel image in one test and 59 × 59 in another **(tested)**: 0.1° is 360″, and 360″ / 6.15″ ≈ 58.5 pixels. Don't assume an exact size.
 - More options: https://irsa.ipac.caltech.edu/ibe/cutouts.html
 
 ### Alternative to steps 1 and 2: one TAP query
