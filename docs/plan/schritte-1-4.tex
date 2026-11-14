@@ -1,0 +1,216 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{parskip}
+\usepackage{booktabs,tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{textcomp}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{akzent}{HTML}{1F4E79}
+\definecolor{codebg}{HTML}{F4F5F7}
+\setlist{itemsep=2pt,topsep=4pt}
+\lstset{
+  language=Python, basicstyle=\ttfamily\small, backgroundcolor=\color{codebg},
+  frame=single, rulecolor=\color{codebg}, columns=fullflexible, keepspaces=true,
+  showstringspaces=false, breaklines=true, xleftmargin=4pt, xrightmargin=4pt,
+  keywordstyle=\color{akzent}\bfseries, commentstyle=\color{gray}
+}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\fertig}[1]{\par\textbf{\color{akzent}Fertig, wenn:} #1}
+
+\title{\color{akzent}\textbf{SPHEREx-Blink: Plan für die Schritte 1 bis 4}}
+\author{Team CHALLENGER5}
+\date{14.\,11.\,2026}
+
+\begin{document}
+\maketitle
+
+\section*{Ziel bis heute Abend}
+
+Jemand gibt eine Himmelsposition ein, und im Browser laufen die SPHEREx-Aufnahmen
+dieser Stelle nach Zeit sortiert als Daumenkino ("`Blink"'). Wir bauen das zuerst
+für ein einziges Ziel, Barnards Stern. Alles Weitere (Filter, Mitteln, Differenz)
+kommt morgen und baut auf diesen vier Schritten auf.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Schritt} & \textbf{Was er tut} \\
+\midrule
+1 Suche & Das Archiv fragen, welche Aufnahmen die Position enthalten. \\
+2 Ausschnitte & Von jeder Aufnahme nur ein kleines Quadrat um das Ziel laden und speichern. \\
+3 Aufbereiten & Hintergrund abziehen, alle Bilder gleich ausrichten, Wellenlänge ablesen. \\
+4 Player & Die Bilder im Browser nacheinander abspielen. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section*{Begriffe}
+
+\begin{description}[leftmargin=3cm,style=nextline,itemsep=1pt]
+\item[RA, Dec] Die zwei Koordinaten eines Punkts am Himmel, wie Länge und Breite auf der Erde. Wir rechnen in Grad.
+\item[IRSA] Das Archiv, das die SPHEREx-Daten bereitstellt.
+\item[FITS-Datei] Das Dateiformat der Aufnahmen. Eine Datei enthält mehrere Ebenen, jede mit einem Kopf (Header) voller Metadaten.
+\item[Detektor] SPHEREx hat sechs Kameras (D1 bis D6), jede für einen anderen Bereich des Infrarotlichts.
+\item[Cutout] Ein kleiner Ausschnitt einer Aufnahme. Die ganze Datei hat rund 70\,MB, der Ausschnitt nur einen Bruchteil.
+\item[WCS] Die Rechenvorschrift im Header, die Pixelpositionen in Himmelskoordinaten übersetzt und umgekehrt.
+\item[Zodiakallicht] Leuchten von Staub im Sonnensystem. Es hellt jede Aufnahme unterschiedlich stark auf.
+\end{description}
+
+\textbf{Wichtig zu wissen:} In einer SPHEREx-Aufnahme hat jeder Pixel eine eigene
+Wellenlänge. Derselbe Stern sieht deshalb in zwei Aufnahmen verschieden hell aus,
+auch wenn er sich nicht verändert hat. Darum lesen wir in Schritt 3 für jedes Bild
+die Wellenlänge am Ziel ab.
+
+\section*{Vorab: Schnittstelle festlegen}
+
+Backend und Frontend einigen sich auf zwei Adressen. Danach kann das Frontend mit
+ausgedachten Testdaten arbeiten, bis das Backend fertig ist.
+
+\begin{itemize}
+\item \code{GET} \path|/api/search?ra=..&dec=..| liefert eine Liste aller Aufnahmen: je Aufnahme eine ID, die Beobachtungszeit, der Detektor und die Download-Adresse.
+\item \code{GET} \path|/api/frame?id=..&ra=..&dec=..&fov=..| liefert ein aufbereitetes Bild: Breite, Höhe, Pixelwerte als Liste, Wellenlänge am Ziel, Zeit, Detektor.
+\end{itemize}
+
+\section*{Schritt 1: Suche (Backend)}
+
+Das Python-Paket \code{astroquery} hat dafür eine fertige Funktion:
+
+\begin{lstlisting}
+from astroquery.ipac.irsa import Irsa
+results = Irsa.query_sia(pos=(coord, radius),
+                         collection=["spherex_dr1", "spherex_qr3"])
+\end{lstlisting}
+
+\begin{itemize}
+\item \code{spherex\_dr1} und \code{spherex\_qr3} sind die zwei aktuellen Datensätze. Beide zusammen decken die ganze bisherige Mission ab.
+\item Jede Ergebniszeile hat die Spalte \code{access\_url}, die Adresse der ganzen Datei.
+\item Der Detektor steht im Dateinamen als \code{D1} bis \code{D6}.
+\item \textbf{Offen:} Wie die Zeitspalte heißt, steht nicht in unserer Doku. Einmal \code{results.colnames} ausgeben und ablesen.
+\end{itemize}
+
+\fertig{Für Barnards Stern kommt eine nach Zeit sortierte Liste zurück.}
+
+\section*{Schritt 2: Ausschnitte laden (Backend)}
+
+An die Adresse der Datei wird die gewünschte Mitte und Größe angehängt. Ohne
+Einheit bedeuten beide Werte Grad:
+
+\begin{center}
+\path|<access_url>?center=<ra>,<dec>&size=0.1|
+\end{center}
+
+\begin{itemize}
+\item Mehrere Ausschnitte gleichzeitig laden, z.\,B. zehn auf einmal:\\
+\code{ThreadPoolExecutor(max\_workers=10)}
+\item Jede geladene Datei unter \code{backend/cache/} ablegen und vor jedem Download nachsehen, ob sie schon da ist.
+\item Das Zeitlimit für Downloads auf 120 Sekunden hochsetzen und bei einem Fehler einmal neu versuchen:\\
+\code{astropy.utils.data.conf.remote\_timeout = 120}
+\item Liegt der Ausschnitt ganz neben der Aufnahme, antwortet IRSA mit Fehler 500. Diese Aufnahme dann überspringen.
+\end{itemize}
+
+\fertig{Der zweite Aufruf für dasselbe Ziel antwortet sofort.}
+
+\section*{Schritt 3: Aufbereiten (Backend, der schwierigste Teil)}
+
+Aus jedem Ausschnitt wird ein Bild, das deckungsgleich auf allen anderen liegt.
+Wir brauchen drei Ebenen der Datei:
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\code{IMAGE} & Die gemessene Helligkeit pro Pixel. \\
+\code{ZODI} & Das berechnete Zodiakallicht, gleiche Größe und Einheit wie \code{IMAGE}. \\
+\code{WCS-WAVE} & Eine Tabelle, aus der sich die Wellenlänge pro Pixel berechnen lässt. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{enumerate}
+\item \textbf{Hintergrund abziehen.} \code{IMAGE} minus \code{ZODI}, Pixel für Pixel. Danach liegt der leere Himmel ungefähr bei null.
+\item \textbf{Wellenlänge am Ziel ablesen.} Erst die Himmelsposition in eine Pixelposition übersetzen, dann für diesen Pixel die Wellenlänge abfragen.
+\item \textbf{Ausrichten.} Jede Aufnahme ist anders gedreht, weil das Teleskop jedes Mal anders lag. Wir legen ein festes Zielraster fest (Ziel in der Mitte, Norden oben, feste Pixelgröße) und rechnen jedes Bild darauf um. Das erledigt das Paket \code{reproject}.
+\item \textbf{Ausliefern.} Pixelwerte, Wellenlänge, Zeit und Detektor zurückgeben.
+\end{enumerate}
+
+Ungetestete Skizze:
+
+\begin{lstlisting}
+def process(path, ra, dec, n_pix=64, pix_arcsec=6.15):
+    coord = SkyCoord(ra, dec, unit="deg")
+    with fits.open(path) as hdul:
+        header = hdul["IMAGE"].header
+        bild = hdul["IMAGE"].data - hdul["ZODI"].data          # 1
+
+        wcs_himmel = WCS(header)
+        x, y = wcs_himmel.world_to_pixel(coord)
+        wcs_welle = WCS(header, fobj=hdul, key="W")              # 2
+        wcs_welle.sip = None      # Pflicht, sonst falsche Werte
+        wl, bw = wcs_welle.pixel_to_world(x, y)
+
+        ziel = WCS(naxis=2)                                      # 3
+        ziel.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        ziel.wcs.crval = [ra, dec]
+        ziel.wcs.crpix = [(n_pix + 1) / 2, (n_pix + 1) / 2]
+        ziel.wcs.cdelt = [-pix_arcsec / 3600, pix_arcsec / 3600]
+        out, _ = reproject_interp((bild, wcs_himmel), ziel,
+                                  shape_out=(n_pix, n_pix))
+    return out, wl.to(u.micrometer).value                        # 4
+\end{lstlisting}
+
+\textbf{Stolpersteine}
+
+\begin{itemize}
+\item \textbf{Ausschnitt größer laden als das Zielbild.} Ein gedrehtes Quadrat füllt die Ecken nicht aus. Etwa 1,5-mal so breit laden wie das angezeigte Feld.
+\item \textbf{Leere Pixel.} Manche Pixel haben keinen Wert (NaN), vor allem wenn das Ziel am Rand der Aufnahme lag. Als \code{null} senden und im Browser grau zeichnen.
+\item \textbf{Oben und unten.} In FITS ist Zeile 0 unten, im Browser oben. Das Bild einmal vertikal spiegeln, sonst steht Norden unten.
+\end{itemize}
+
+\fertig{Zwei Bilder von Barnards Stern aus verschiedenen Monaten werden abwechselnd
+angezeigt, und die Hintergrundsterne bleiben an derselben Stelle stehen.}
+
+\section*{Schritt 4: Player (Frontend)}
+
+\begin{itemize}
+\item Eingabefelder für RA und Dec. Nach dem Absenden \path|/api/search| aufrufen, dann die Bilder einzeln nachladen und anzeigen, sobald sie ankommen.
+\item Jedes Bild auf ein \code{<canvas>} zeichnen.
+\item \textbf{Eine feste Helligkeitsskala für alle Bilder.} Die Umrechnung von Messwert zu Grauwert darf sich von Bild zu Bild nicht ändern, sonst täuscht der Blink Helligkeitsänderungen vor.
+\item Knöpfe für Play, Pause, vor und zurück, dazu ein Schieberegler.
+\item Unter dem Bild Datum, Detektor und Wellenlänge anzeigen, in der Bildmitte ein Fadenkreuz.
+\end{itemize}
+
+\fertig{Barnards Stern läuft von der Eingabe bis zum Blink ohne Handarbeit durch.}
+
+\section*{Aufteilung}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Person} & \textbf{Aufgabe} \\
+\midrule
+1 & Schritte 1 und 2: Suche, Download, Cache \\
+2 & Schritt 3, zuerst an einer einzelnen von Hand geladenen Datei \\
+3 & Schritt 4: Player mit Testdaten \\
+4 & Eingabe und Anbindung ans Backend, danach Hosting vorbereiten \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+In \path|backend/requirements.txt| fehlen noch \code{astropy}, \code{astroquery} und \code{reproject}.
+
+\textbf{Falls Schritt 3 heute nicht fertig wird:} nur Bilder eines einzigen
+Detektors ohne Umrechnung zeigen und das Ziel mit einem Fadenkreuz markieren.
+
+\vfill
+{\small\color{gray} Quellen: lokale Kopien der offiziellen SPHEREx-Dokumentation
+unter \path|docs/spherex/| (Data Access, Cutout Service, Tutorials zu Spectral
+Images und Cutouts). Die Code-Skizze ist nicht an echten Daten getestet.}
+
+\end{document}
