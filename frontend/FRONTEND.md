@@ -37,7 +37,7 @@ Taken from [`package.json`](package.json), [`angular.json`](angular.json) and th
 | Language | TypeScript | ~6.0 |
 | Styles | SCSS | global styles in `src/styles.scss`, one `.scss` per component |
 | Reactive data | RxJS | ~7.8 |
-| HTTP | Angular `HttpClient` | with `withFetch()` (Fetch API) |
+| HTTP | Fetch API in `ApiService` | `fetch` instead of `HttpClient`, because the image call needs response headers, a 202 retry loop and `AbortController` (as in `docs/API.md`). `HttpClient` stays provided. |
 | Routing | Angular Router | lazy-loaded pages (`loadComponent`) |
 | Build / dev server | `@angular/build` (Angular CLI 22.2.7) | application builder, dev server with proxy |
 | Unit tests | Vitest 5 + jsdom | run with `ng test` |
@@ -88,11 +88,16 @@ frontend/
       app.routes.ts        '' → Home (lazy), '**' → redirect to ''
       core/
         api.config.ts      API_BASE_URL = '/api'
-        services/          planned: API services (images, object search), view state
-        models/            planned: TypeScript types for backend responses
+        models/            api.models.ts: types of the backend responses
+        services/          api.service.ts (all /api calls, picture cache), viewer-state.service.ts (shared signals)
+        utils/             frames.ts: pickFrame, bands, frames of a season (+ spec)
       pages/
-        home/              main page (currently a placeholder)
-      components/          planned: viewer, slider-panel, object-search
+        home/              layout: full-screen stage, search, HUD, collapsible menu, keyboard shortcuts
+      components/
+        viewer/            F1: the picture, predicted-position ring, loading/progress/error states
+        search-bar/        F4: one search box for names and coordinates
+        control-panel/     F2/F3: band chips, sliders, playback, frame details, settings
+        frame-plot/        SVG plot of all images of the band (season x wavelength), click to jump
   public/                  static assets (favicon)
   proxy.conf.mjs           dev proxy for /api
   nginx.conf               prod server config
@@ -114,11 +119,14 @@ Status: **planned** (agreed, not built), **in progress**, **done**. New features
 
 | ID | Feature | Status |
 |---|---|---|
-| F1 | Full-screen visualization | planned |
-| F2 | Time slider (points in time of the searched object) | planned |
-| F3 | Wavelength slider (values 1-102) | planned |
-| F4 | Object search | planned |
-| F5 | Responsive web design | planned |
+| F1 | Full-screen visualization | done |
+| F2 | Time slider (observing seasons of the searched object) | done |
+| F3 | Wavelength slider (continuous, in µm, across all detectors) | done |
+| F4 | Object search | done |
+| F5 | Responsive web design | done |
+| F6 | Blink / wavelength sweep playback, keyboard shortcuts | done |
+| F7 | Frame details, stretch, mask, predicted-position ring, field of view (in the menu) | done |
+| F8 | Shareable page URL (`?q=&fov=&visit=&wl=`) | done |
 
 F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. a side drawer or overlay) that is closed or small by default, so the visualization stays the focus. The menu is built so that more controls can be added later.
 
@@ -138,9 +146,9 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 
 ### F3: Wavelength slider
 
-- A slider with **102 steps (values 1 to 102)**, one per SPHEREx spectral channel (6 detectors × 17 channels).
-- Moving the slider shows the image at that wavelength in F1.
-- Shows the selected value; if the backend provides it, also the wavelength in µm for that channel (the µm values are not hard-coded in the frontend).
+- **Changed (2026-11-14):** not 102 channel steps but one continuous axis in µm, from `coverage.wavelength_range_um` (about 0.74 to 5.0 µm), as the backend API defines it (`docs/API.md` section 1). Every SPHEREx pixel has its own wavelength, so channels are not a useful unit here.
+- The frontend picks the frame of the current season nearest to the slider value (`pickFrame`, no request). If none lies within 2 bandwidths, a notice shows the nearest wavelength.
+- Band chips D1-D6 above the sliders jump into a detector's range; their ranges and counts come from the data.
 
 **Notes for both sliders:**
 - Changes are sent to the backend as parameters; to avoid a request on every pixel of slider movement, requests should be debounced or sent on release.
@@ -173,16 +181,19 @@ From [`docs/PROJECT_OVERVIEW.md`](../docs/PROJECT_OVERVIEW.md) (sections 3-4). N
 
 ## 5. Interface to the backend
 
-The frontend only depends on the backend through HTTP calls under `/api`. The exact endpoints and response formats are **not defined yet** and must be agreed with the backend team. Document them here once they are fixed.
+Defined in [`docs/API.md`](../docs/API.md) (live reference: `/docs` of the running backend). The frontend uses three calls:
 
-What the frontend needs from the backend:
-
-| Needed for | Frontend sends | Frontend expects |
+| Needed for | Call | Gives |
 |---|---|---|
-| F4 | an object name | the coordinates (RA/Dec) and any other parameters, or "not found" |
-| F2 | the searched object (or its coordinates) | the list of available points in time (observation dates) |
-| F1 | object, selected point in time (F2), selected wavelength channel 1-102 (F3) | the image to display (image URL or image data) |
-| F3 | – | optional: the wavelength in µm for each channel 1-102 |
+| F4 | `GET /api/resolve?q=` | the target (`ra, dec, fov, pmra, pmdec, pm_epoch`), note, warnings |
+| F2, F3 | `GET /api/coverage?<target>` (polled every 1.5 s until `ready`) | `visits[]` (time slider), `wavelength_range_um` (wavelength slider), `frames[]` |
+| F1 | `GET /api/frames/{id}/image.png?<target>&mask=&vmin=&vmax=` | the PNG (47 px, scaled up with CSS `pixelated`) and `X-*` headers (wavelength, time, flags, target pixel, stretch) |
+
+How the frontend uses it:
+- **Stretch "same for all seasons"** (default): the blink set (each season's frame at this wavelength) is drawn with the brightness range of the first season's frame, so brightness changes stay visible (needed for RW Aurigae, R Draconis).
+- On a new wavelength the whole blink set is requested at once, so blinking afterwards is instant. Loaded pictures are kept in memory for the session.
+- Slider changes are debounced (150 ms); a superseded image request is aborted.
+- Mask is **off** by default (the reference design); the API's default is on.
 
 Rules:
 - All paths start with `/api` (see `API_BASE_URL` in [`core/api.config.ts`](src/app/core/api.config.ts)).
@@ -228,11 +239,8 @@ The frontend starts without the backend, but all `/api` calls fail until the bac
 
 ## 9. Open questions
 
-- Endpoints and response format of the backend (section 5).
-- Image format delivered by the backend (e.g. PNG/JPEG per image).
-- What happens if there is no image for a combination of point in time and wavelength (SPHEREx sees a spot with only 2 of 6 detectors per pointing): hide the value, disable it, or show a message?
-- Layout of the slider menu: side drawer vs. overlay on desktop.
-- Whether a UI library is used for sliders and the panel, or plain Angular components.
+- Decided: menu is a side drawer on screens ≥ 900 px (the picture shrinks while it is open) and a bottom sheet below; no UI library (plain Angular + native range inputs).
+- Decided: no image at a wavelength in a season → nearest frame plus a notice.
 
 ## 10. Changelog
 
@@ -240,3 +248,4 @@ The frontend starts without the backend, but all `/api` calls fail until the bac
 |---|---|
 | 2026-11-14 | First version: architecture, tech stack, features F1-F5. |
 | 2026-11-14 | Video player removed. Sliders reduced to two: time slider (F2) and wavelength slider 1-102 (F3); RGB, band count, RA and Dec sliders removed. |
+| 2026-11-14 | Implemented F1-F8 against `docs/API.md`; F3 changed to a continuous µm slider. |
