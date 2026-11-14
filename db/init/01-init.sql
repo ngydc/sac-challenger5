@@ -1,0 +1,2 @@
+-- Runs once, on first startup of an empty data volume.
+-- Add schema / seed statements here.
