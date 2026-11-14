@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:irsa.ipac.caltech.edu)",
+      "WebFetch(domain:caltech-ipac.github.io)",
+      "WebFetch(domain:docs.astropy.org)",
+      "WebFetch(domain:astroquery.readthedocs.io)"
+    ]
+  }
+}
