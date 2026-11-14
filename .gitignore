@@ -1,0 +1,43 @@
+# --- Python / FastAPI ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Angular / Node ---
+node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/out-tsc/
+frontend/coverage/
+npm-debug.log*
+yarn-error.log*
+
+# --- Secrets / local config ---
+.env
+.env.*
+!.env.example
+
+# --- Local data and caches (downloaded SPHEREx FITS, cutout cache) ---
+backend/cache/
+backend/data/
+*.fits
+*.fits.gz
+
+# --- Editors / OS ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Claude Code local settings ---
+.claude/settings.local.json
