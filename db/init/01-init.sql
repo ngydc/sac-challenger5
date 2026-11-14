@@ -1,2 +1,3 @@
 -- Runs once, on first startup of an empty data volume.
--- Add schema / seed statements here.
+-- The cache tables are NOT created here: the backend applies backend/app/schema.sql itself at startup
+-- (idempotent), so the schema also reaches databases whose volume already exists.

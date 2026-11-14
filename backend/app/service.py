@@ -8,15 +8,15 @@ outside the image), tutorial-intro-spectral-images.md (spectral WCS), explanator
 Design in one paragraph: the API never waits on IRSA by default. `coverage` runs search + wavelength
 lookup in a background thread and is polled. Pixel data is fetched by a small pool of worker threads
 (IRSA answers 503 when hit harder) from a priority queue (0 = a user is waiting; a higher number is kept
-free for background prefetching, which the MVP API does not offer yet). Fetched cutouts are cached on
-disk by spherex.py and never go stale (the URL contains the file version).
+free for background prefetching, which the MVP API does not offer yet). Fetched cutouts are stored
+in Postgres (app/db.py, schema in app/schema.sql) together with the search results and calibration
+files, and never go stale (the URL contains the file version). Only reprojected frames are kept in memory.
 """
 from __future__ import annotations
 
 import hashlib
 import io
 import itertools
-import json
 import logging
 import math
 import os
@@ -25,7 +25,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import Future
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 
 import httpx
 import numpy as np
@@ -34,7 +34,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.time import Time
 
-from . import presets, spherex
+from . import db, presets, spherex
 
 log = logging.getLogger("spherex.service")
 
@@ -48,10 +48,11 @@ WORKERS = int(os.environ.get("SPHEREX_WORKERS", "3"))  # parallel requests to IR
 COVERAGE_TTL_S = 3600.0  # re-search after this long, so new weekly data appears
 REFRESH_RETRY_S = 120.0  # a failed refresh is retried after this long (the old data keeps being served)
 ERROR_RETRY_S = 15.0  # a failed first build is retried after this long
-STATE_DIR = spherex.CACHE_DIR.parent / "coverage"  # saved search results (backend/cache/coverage/)
+COLLECTIONS_TTL_S = 3600.0  # ask IRSA for its collection list again after this long
 FAIL_COOLDOWN_S = 20.0  # after a failed download, don't hit IRSA again for this long
 SEARCH_RETRIES = 4  # IRSA's search service returns 502 now and then
 MAX_PIXELS_CACHE = 256  # aligned frames kept in memory
+RECORD_FIELDS = [f.name for f in fields(spherex.ImageRecord)]
 
 
 class ApiError(Exception):
@@ -209,75 +210,65 @@ class AlignedFrame:
 
 
 class Service:
-    def __init__(self) -> None:
+    def __init__(self, store: db.Store = db.store) -> None:
+        self.db = store  # persistent cache (app/db.py): collections, coverage, cutouts, calibration files
         self._lock = threading.RLock()
-        self._cov: dict[str, Coverage] = {}
+        self._cov: dict[str, Coverage] = {}  # live state, including builds in progress
         self._jobs = JobQueue(WORKERS)
-        self._inflight: dict[str, Future] = {}
-        self._failures: dict[str, tuple[float, str, str]] = {}  # cutout key -> (time, kind, message)
-        self._aligned: OrderedDict[tuple, AlignedFrame] = OrderedDict()
-        self._collections: tuple[float, list[str]] | None = None
+        self._inflight: dict[str, Future] = {}  # cutout key -> running download
+        self._aligned: OrderedDict[tuple, AlignedFrame] = OrderedDict()  # hot frames, in memory only
         self._client = httpx.Client(timeout=180, follow_redirects=True, limits=httpx.Limits(max_connections=WORKERS * 2))
 
     # -- search ------------------------------------------------------------------------------
     def collections(self) -> list[str]:
-        """SPHEREx SIA2 collections IRSA currently lists (new releases appear by themselves). The last
-        successful answer is kept on disk, so an IRSA outage doesn't stop us."""
-        with self._lock:
-            if self._collections and time.time() - self._collections[0] < 3600:
-                return self._collections[1]
-        path = STATE_DIR / "collections.json"
+        """SPHEREx SIA2 collections IRSA currently lists (new releases appear by themselves). Asked again
+        after COLLECTIONS_TTL_S; the stored list is used when IRSA is down."""
+        stored = self.db.collections()
+        if stored and time.time() - stored[1] < COLLECTIONS_TTL_S:
+            return stored[0]
         try:
             names = self._retry(spherex.spherex_collections, "listing collections")
-            STATE_DIR.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(names))
         except ApiError:
-            if not path.exists():
+            if not stored:
                 raise
-            names = json.loads(path.read_text())
-            log.warning("IRSA collection list unavailable, using the last known one: %s", names)
-        with self._lock:
-            self._collections = (time.time(), names)
+            log.warning("IRSA collection list unavailable, using the last known one: %s", stored[0])
+            return stored[0]
+        self.db.save_collections(names)
         return names
 
     # -- persisted coverage (survives restarts and IRSA outages) ---------------------------
-    @staticmethod
-    def _state_path(spec: TargetSpec):
-        return STATE_DIR / f"coverage-{spec.key}.json"
-
     def _save(self, cov: "Coverage") -> None:
+        located = {frame_id(e.record): e for e in cov.exposures}
+        images = []
+        for fid, r in cov.records.items():
+            e = located.get(fid)
+            images.append({**asdict(r), "frame_id": fid, "x": e.x if e else None, "y": e.y if e else None,
+                           "wavelength_um": e.wavelength_um if e else None,
+                           "bandwidth_um": e.bandwidth_um if e else None})
+        s = cov.spec
+        target = {"ra": s.ra, "dec": s.dec, "fov_deg": s.fov_deg, "pmra": s.pmra, "pmdec": s.pmdec, "pm_epoch": s.pm_epoch}
         try:
-            STATE_DIR.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "saved": cov.data_as_of, "collections": cov.collections, "failed_locate": cov.failed_locate,
-                "records": [asdict(r) for r in cov.records.values()],
-                "exposures": [{"id": frame_id(e.record), "x": e.x, "y": e.y, "wl": e.wavelength_um, "bw": e.bandwidth_um}
-                              for e in cov.exposures],
-            }
-            tmp = self._state_path(cov.spec).with_suffix(".tmp")
-            tmp.write_text(json.dumps(payload))
-            tmp.replace(self._state_path(cov.spec))
-        except Exception:  # noqa: BLE001 - persistence is an optimisation, never fatal
-            log.exception("could not save coverage")
+            self.db.save_coverage(s.key, target, cov.collections, cov.failed_locate, cov.data_as_of, images)
+        except Exception:  # noqa: BLE001 - the coverage is still served from memory
+            log.exception("could not save coverage %s", s.key)
 
     def _load(self, spec: TargetSpec) -> "Coverage | None":
-        path = self._state_path(spec)
-        if not path.exists():
+        data = self.db.load_coverage(spec.key)
+        if data is None:
             return None
-        try:
-            data = json.loads(path.read_text())
-            recs = [spherex.ImageRecord(**r) for r in data["records"]]
-            by_id = {frame_id(r): r for r in recs}
-            cov = Coverage(spec, state="ready", collections=data["collections"], records=by_id,
-                           failed_locate=data.get("failed_locate", 0), data_as_of=data["saved"])
-            cov.exposures = [spherex.Exposure(by_id[e["id"]], e["x"], e["y"], e["wl"], e["bw"]) for e in data["exposures"]]
-            self._index_visits(cov, recs)
-            cov.located = cov.total = len(recs)
-            cov.next_refresh = data["saved"] + COVERAGE_TTL_S
-            return cov
-        except Exception:  # noqa: BLE001
-            log.exception("ignoring unreadable saved coverage %s", path)
-            return None
+        recs, exposures = [], []
+        for img in data["images"]:
+            r = spherex.ImageRecord(**{f: img[f] for f in RECORD_FIELDS})
+            recs.append(r)
+            if img["x"] is not None:
+                exposures.append(spherex.Exposure(r, img["x"], img["y"], img["wavelength_um"], img["bandwidth_um"]))
+        cov = Coverage(spec, state="ready", collections=data["collections"], records={frame_id(r): r for r in recs},
+                       failed_locate=data["failed_locate"], data_as_of=data["data_as_of"])
+        cov.exposures = exposures
+        self._index_visits(cov, recs)
+        cov.located = cov.total = len(recs)
+        cov.next_refresh = data["data_as_of"] + COVERAGE_TTL_S
+        return cov
 
     @staticmethod
     def _index_visits(cov: "Coverage", recs: list[spherex.ImageRecord]) -> None:
@@ -335,7 +326,8 @@ class Service:
             cov.total = len(recs)
             cov.state = "locating"
             cov.updated = time.time()
-            exps, failed = spherex.locate_on_detector(recs, cov.spec.at, workers=8, on_progress=progress)
+            exps, failed = spherex.locate_on_detector(recs, cov.spec.at, workers=8, on_progress=progress,
+                                                      calib_cache=self.db)
             cov.exposures, cov.failed_locate = exps, len(failed)
             cov.state, cov.updated = "ready", time.time()
             cov.data_as_of = cov.updated
@@ -356,10 +348,10 @@ class Service:
                 cov.state, cov.message, cov.updated = "error", msg, time.time()
 
     def record_for(self, spec: TargetSpec, fid: str) -> spherex.ImageRecord:
-        """Resolve a frame id to its image. Normally known from the coverage; after a restart the
-        search is simply run again."""
-        obs_id, det = split_frame_id(fid)
-        cov = self._cov.get(spec.key)
+        """Resolve a frame id to its image: from the coverage in memory or in the database, else by
+        searching again."""
+        split_frame_id(fid)
+        cov = self._cov.get(spec.key) or self._load(spec)
         if cov and fid in cov.records:
             return cov.records[fid]
         _, recs = self._search(spec)
@@ -368,74 +360,89 @@ class Service:
                 return r
         raise ApiError(404, "unknown_frame", f"no image {fid} covers this position/field of view")
 
-    # -- frame state -------------------------------------------------------------------------
-    def frame_state(self, spec: TargetSpec, record: spherex.ImageRecord) -> str:
-        """ready | fetching | queued | failed | outside | missing"""
-        path = spherex.cutout_path(record, spec.center, spec.cutout_size)
-        if path.exists():
-            return "ready"
-        key = path.name
+    # -- cutouts -----------------------------------------------------------------------------
+    @staticmethod
+    def _cutout_ref(spec: TargetSpec, record: spherex.ImageRecord) -> tuple[str, str]:
+        url = spherex.cutout_url(record, spec.center, spec.cutout_size)
+        return spherex.cutout_key(url), url
+
+    def frame_states(self, spec: TargetSpec, records: list[spherex.ImageRecord]) -> list[str]:
+        """For each record: ready | fetching | queued | failed | outside | missing (one database query)."""
+        keys = [self._cutout_ref(spec, r)[0] for r in records]
+        stored = self.db.cutout_states(keys)
+        out = []
         with self._lock:
-            fut = self._inflight.get(key)
-            if fut is not None and not fut.done():
-                return "fetching" if fut.running() else "queued"
-            fail = self._failures.get(key)
-        if fail:
-            if fail[1] == "outside":
-                return "outside"
-            if time.time() - fail[0] < FAIL_COOLDOWN_S:
-                return "failed"
-        return "missing"
+            for key in keys:
+                fut = self._inflight.get(key)
+                status, updated, _ = stored.get(key, (None, 0.0, None))
+                if status in ("ready", "outside"):
+                    out.append(status)
+                elif fut is not None and not fut.done():
+                    out.append("fetching" if fut.running() else "queued")
+                elif status == "error" and time.time() - updated < FAIL_COOLDOWN_S:
+                    out.append("failed")
+                else:
+                    out.append("missing")
+        return out
+
+    def frame_state(self, spec: TargetSpec, record: spherex.ImageRecord) -> str:
+        return self.frame_states(spec, [record])[0]
 
     def ensure_cutout(self, spec: TargetSpec, record: spherex.ImageRecord, priority: int) -> Future | None:
-        """Make sure the cutout is (being) fetched. Returns None if already cached, else the pending Future
+        """Make sure the cutout is (being) fetched. Returns None if already stored, else the pending Future
         (shared by everyone asking for the same cutout)."""
-        path = spherex.cutout_path(record, spec.center, spec.cutout_size)
-        if path.exists():
-            return None
-        key = path.name
+        key, url = self._cutout_ref(spec, record)
         with self._lock:
             fut = self._inflight.get(key)
             if fut is not None and not fut.done():
                 return fut
-            fail = self._failures.get(key)
-            if fail and fail[1] == "outside":
-                raise ApiError(404, "outside_image", "the requested field is outside this image")
-            if fail and time.time() - fail[0] < FAIL_COOLDOWN_S:
-                raise ApiError(502, "upstream_error", f"recent download failed, retry later: {fail[2]}")
+        status, updated, message = self.db.cutout_states([key]).get(key, (None, 0.0, None))
+        if status == "ready":
+            return None
+        if status == "outside":
+            raise ApiError(404, "outside_image", "the requested field is outside this image")
+        if status == "error" and time.time() - updated < FAIL_COOLDOWN_S:
+            raise ApiError(502, "upstream_error", f"recent download failed, retry later: {message}")
+
+        with self._lock:
+            fut = self._inflight.get(key)
+            if fut is not None and not fut.done():
+                return fut
 
             def job() -> None:
-                with spherex.fetch_cutout_hdul(record, spec.center, spec.cutout_size, self._client):
-                    pass
+                try:
+                    data = spherex.download_cutout(record, spec.center, spec.cutout_size, self._client)
+                except spherex.OutsideImageError:
+                    self.db.put_cutout_failure(key, url, "outside", "outside image")
+                    raise
+                except Exception as err:
+                    self.db.put_cutout_failure(key, url, "error", str(err)[:200])
+                    raise
+                self.db.put_cutout(key, url, data)
 
             fut = self._jobs.submit(priority, job)
             self._inflight[key] = fut
 
-            def done(f: Future, key=key) -> None:
+            def done(_f: Future, key=key) -> None:
                 with self._lock:
                     self._inflight.pop(key, None)
-                    exc = f.exception()
-                    if exc is None:
-                        self._failures.pop(key, None)
-                    elif isinstance(exc, spherex.OutsideImageError):
-                        self._failures[key] = (time.time(), "outside", "outside image")
-                    else:
-                        self._failures[key] = (time.time(), "error", str(exc)[:200])
 
             fut.add_done_callback(done)
             return fut
 
     # -- pixels ------------------------------------------------------------------------------
     def aligned_frame(self, spec: TargetSpec, record: spherex.ImageRecord) -> AlignedFrame:
-        """Read the cached cutout and put it on the view's north-up grid (~40 ms). Cutout must be cached."""
+        """Read the stored cutout and put it on the view's north-up grid (~40 ms). Cutout must be stored."""
         ck = (spec.key, frame_id(record))
         with self._lock:
             hit = self._aligned.get(ck)
             if hit is not None:
                 self._aligned.move_to_end(ck)
                 return hit
-        path = spherex.cutout_path(record, spec.center, spec.cutout_size)
-        with fits.open(path) as hdul:
+        data = self.db.cutout(self._cutout_ref(spec, record)[0])
+        if data is None:
+            raise ApiError(409, "not_downloaded", f"frame {frame_id(record)} is not downloaded yet, retry")
+        with fits.open(io.BytesIO(data)) as hdul:
             frame = spherex.process(hdul, record, spec.at(record.t_mid_mjd))
         grid, shape = spherex.north_up_wcs(spec.center, spec.fov_deg, PIXEL_SCALE_ARCSEC / 3600)
         masked = spherex.reproject_frame(frame, grid, shape)

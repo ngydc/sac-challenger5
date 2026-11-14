@@ -17,14 +17,13 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-import os
 import random
 import time
 import warnings
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import Protocol
 
 import httpx
 import numpy as np
@@ -38,8 +37,6 @@ log = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
 logging.getLogger("astropy").setLevel(logging.ERROR)
 
-CACHE_DIR = Path(os.environ.get("SPHEREX_CACHE_DIR", Path(__file__).resolve().parents[1] / "cache" / "cutouts"))
-
 # Collections we never want for time-series images: the All-Sky Cube has no time axis, and the
 # deep-field collections only add extra images in a few regions (opt in with include_deep=True).
 EXCLUDE_COLLECTION_PARTS = ("cube",)
@@ -50,7 +47,7 @@ DEEP_PART = "deep"
 # SOURCE is deliberately absent: it is set on most pixels (intro notebook).
 BAD_FLAG_NAMES = ("NONFUNC", "HOT", "COLD", "TRANSIENT")
 
-# HDUs kept in the cache. The PSF/EPSF extension is ~96% of a cutout's bytes and not needed for display.
+# HDUs kept in a stored cutout. The PSF/EPSF extension is ~96% of a cutout's bytes and not needed for display.
 KEEP_HDUS = ("IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE")
 
 
@@ -193,26 +190,20 @@ def cutout_url(record: ImageRecord, center: SkyCoord, size_deg: float) -> str:
     return f"{record.access_url}?center={center.ra.deg:.7f},{center.dec.deg:.7f}&size={size_deg:.5f}"
 
 
-def cutout_path(record: ImageRecord, center: SkyCoord, size_deg: float) -> Path:
-    """Where the cached (PSF-stripped) copy of this cutout lives. Deterministic, so callers can
-    check `.exists()` to know whether a download is needed. The URL contains the file version and
-    processing date, so a reprocessed image gets a new path and a cached copy never goes stale."""
-    return CACHE_DIR / f"{hashlib.sha1(cutout_url(record, center, size_deg).encode()).hexdigest()}.fits"
+def cutout_key(url: str) -> str:
+    """Cache key of a cutout: SHA-1 of its URL. The URL contains the file version and processing date,
+    so a reprocessed image gets a new key and a stored copy never goes stale."""
+    return hashlib.sha1(url.encode()).hexdigest()
 
 
-def fetch_cutout_hdul(
-    record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client, retries: int = 6
-) -> fits.HDUList:
-    """Download (or load from cache) a cutout, with the PSF extension removed.
+def download_cutout(record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client,
+                    retries: int = 6) -> bytes:
+    """Download a cutout and return it as FITS bytes with the PSF extension removed (~4% of the size).
 
     IRSA rate-limits: after a request it often answers `503 Server busy, retry later.` (measured
     2026-11-14: with 6 parallel workers ~30% of cutouts hit this). So a 503 waits and retries with
     exponential backoff (or the server's Retry-After), instead of failing after a few seconds."""
     url = cutout_url(record, center, size_deg)
-    path = cutout_path(record, center, size_deg)
-    if path.exists():
-        return fits.open(path)
-
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
@@ -236,9 +227,14 @@ def fetch_cutout_hdul(
 
     with fits.open(io.BytesIO(resp.content)) as full:
         kept = fits.HDUList([full[0].copy()] + [full[name].copy() for name in KEEP_HDUS if name in full])
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    kept.writeto(path, overwrite=True)
-    return kept
+        buf = io.BytesIO()
+        kept.writeto(buf)
+    return buf.getvalue()
+
+
+def fetch_cutout_hdul(record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client) -> fits.HDUList:
+    """Download a cutout (PSF removed) and open it. Not cached; the API caches through app/db.py."""
+    return fits.open(io.BytesIO(download_cutout(record, center, size_deg, client)))
 
 
 # --------------------------------------------------------------------------------------------
@@ -338,7 +334,13 @@ def fetch_frames(
 # (user-guide-data-products.md: "for science analysis, use CWAVE and CBAND").
 # --------------------------------------------------------------------------------------------
 S3_BUCKET_URL = "https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com"  # irsa-cloud-access.md
-CALIB_DIR = CACHE_DIR.parent / "calib"
+
+
+class CalibrationCache(Protocol):
+    """Where downloaded calibration files are kept (app/db.py's Store implements this)."""
+
+    def calibration(self, s3_key: str) -> bytes | None: ...
+    def put_calibration(self, s3_key: str, data: bytes) -> None: ...
 
 
 def release_of(record: ImageRecord) -> str:
@@ -370,11 +372,11 @@ def fetch_image_header(record: ImageRecord, client: httpx.Client, chunk: int = 4
 
 
 class SpectralMaps:
-    """Per-detector CWAVE/CBAND images (2040 x 2040, microns), downloaded once and cached.
-    The file for each release and detector is found by listing the public S3 bucket."""
+    """Per-detector CWAVE/CBAND images (2040 x 2040, microns). The file for each release and detector
+    is found by listing the public S3 bucket; with a `cache`, each file is downloaded only once."""
 
-    def __init__(self, client: httpx.Client):
-        self.client = client
+    def __init__(self, client: httpx.Client, cache: CalibrationCache | None = None):
+        self.client, self.cache = client, cache
         self._maps: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
 
     def _key(self, release: str, detector: str) -> str:
@@ -389,15 +391,14 @@ class SpectralMaps:
     def get(self, release: str, detector: str) -> tuple[np.ndarray, np.ndarray]:
         if (release, detector) not in self._maps:
             key = self._key(release, detector)
-            path = CALIB_DIR / key
-            if not path.exists():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with self.client.stream("GET", f"{S3_BUCKET_URL}/{key}") as resp:
-                    resp.raise_for_status()
-                    with open(path, "wb") as fh:
-                        for part in resp.iter_bytes():
-                            fh.write(part)
-            with fits.open(path) as h:
+            data = self.cache.calibration(key) if self.cache else None
+            if data is None:
+                resp = self.client.get(f"{S3_BUCKET_URL}/{key}")
+                resp.raise_for_status()
+                data = resp.content
+                if self.cache:
+                    self.cache.put_calibration(key, data)
+            with fits.open(io.BytesIO(data)) as h:
                 self._maps[(release, detector)] = (h["CWAVE"].data.astype(np.float32), h["CBAND"].data.astype(np.float32))
         return self._maps[(release, detector)]
 
@@ -424,10 +425,11 @@ def locate_on_detector(
     target_at: Callable[[float], SkyCoord],
     workers: int = 16,
     on_progress: Callable[[int, int], None] | None = None,  # called as (done, total) after each image
+    calib_cache: CalibrationCache | None = None,
 ) -> tuple[list[Exposure], list[tuple[ImageRecord, str]]]:
     """For every image: target pixel (exact header WCS) and wavelength there (CWAVE map)."""
     with httpx.Client(timeout=120, follow_redirects=True) as client:
-        maps = SpectralMaps(client)
+        maps = SpectralMaps(client, calib_cache)
         for rel, det in {(release_of(r), r.detector) for r in records}:
             maps.get(rel, det)  # download maps up front, once
 

@@ -356,11 +356,11 @@ Marker ring on a picture shown at `scale`: `cx = (p.target.x + 0.5) * scale`, `c
 - **Not every wavelength in every visit** (see `exact`). Frames of one visit at different wavelengths were taken up to a few weeks apart.
 - **Bright stars are saturated** (Barnard's Star in several bands): the core carries `OVERFLOW`/`BLOOM` and, with `mask=true`, shows as a hole.
 - **Pixels are 6.15″**: Barnard's Star shifts only about 1.7 pixels per year, so a blink shows small motions. Use a small field of view and scale up.
-- **IRSA is the bottleneck.** About 12 s per uncached frame, and its services are sometimes unavailable for minutes (we saw `502` errors). The backend retries and caches everything it gets; coverage lists are saved on disk and survive restarts.
+- **IRSA is the bottleneck.** About 12 s per uncached frame, and its services are sometimes unavailable for minutes (we saw `502` errors). The backend retries and caches everything it gets in its Postgres database (coverage lists, cutouts, calibration files), so the cache survives restarts and container rebuilds.
 - More data: `docs/DATA_COVERAGE.md`.
 
 ## 8. Not in the MVP (can be added later)
 
 Raw pixel values for client-side drawing, prefetching, a status endpoint, a credits/acknowledgement endpoint (put the acknowledgement text in the page footer for now), co-added and difference images, per-pixel quality flags, Gaia/WISE overlays, spectra, short target keys for embedding, comets and asteroids. Ideas for each are in the earlier design notes; none is needed for "enter a target, scrub through time and wavelength".
 
-Known limits of the current implementation: frames and coverage lists are cached as files in `backend/cache/` (in Docker this folder is not a volume yet, so a container rebuild empties it); each (position, `fov`) is cached separately, so two users looking at slightly different coordinates do not share frames.
+Known limits of the current implementation: the cache (Postgres, schema in `backend/app/schema.sql`) is never pruned, so it only grows (about 120 KB per frame); each (position, `fov`) is cached separately, so two users looking at slightly different coordinates do not share frames.

@@ -1,10 +1,11 @@
-"""Offline tests of the MVP API contract (docs/API.md). Nothing here talks to IRSA or the name service:
-coverage comes from a saved file, frames are synthetic, name lookups are faked.
+"""Offline tests of the MVP API contract (docs/API.md). Nothing here talks to IRSA, the name service or
+the database: coverage comes from an in-memory store, frames are synthetic, name lookups are faked.
 Run from backend/:  .venv\\Scripts\\python -m pytest tests -q"""
 from __future__ import annotations
 
 import io
 import threading
+import time
 from concurrent.futures import Future
 
 import httpx
@@ -26,19 +27,60 @@ def rec(obs: str, det: str, mjd: float) -> spherex.ImageRecord:
                                access_url=f"https://example.invalid/ibe/data/spherex/dr1/{obs}{det}.fits", s_region="")
 
 
+class FakeStore:
+    """In-memory stand-in for app.db.Store (same methods), so these tests need no database.
+    The real SQL is tested in test_db.py."""
+
+    def __init__(self):
+        self.cols, self.cov, self.cutouts, self.calib = None, {}, {}, {}
+
+    def collections(self):
+        return self.cols
+
+    def save_collections(self, names):
+        self.cols = (list(names), time.time())
+
+    def save_coverage(self, key, target, collections, failed_locate, data_as_of, images):
+        self.cov[key] = {"collections": collections, "failed_locate": failed_locate, "data_as_of": data_as_of,
+                         "images": sorted((dict(i) for i in images), key=lambda i: i["t_mid_mjd"])}
+
+    def load_coverage(self, key):
+        return self.cov.get(key)
+
+    def cutout(self, key):
+        row = self.cutouts.get(key)
+        return row[3] if row and row[0] == "ready" else None
+
+    def cutout_states(self, keys):
+        return {k: self.cutouts[k][:3] for k in keys if k in self.cutouts}
+
+    def put_cutout(self, key, url, data):
+        self.cutouts[key] = ("ready", time.time(), None, data)
+
+    def put_cutout_failure(self, key, url, status, message):
+        if self.cutouts.get(key, ("",))[0] != "ready":
+            self.cutouts[key] = (status, time.time(), message, None)
+
+    def calibration(self, s3_key):
+        return self.calib.get(s3_key)
+
+    def put_calibration(self, s3_key, data):
+        self.calib.setdefault(s3_key, data)
+
+
 @pytest.fixture()
-def fresh(tmp_path, monkeypatch):
-    """Empty service state, with the saved-coverage folder and cutout cache redirected to a temp dir."""
-    monkeypatch.setattr(svc, "STATE_DIR", tmp_path / "coverage")
-    monkeypatch.setattr(spherex, "CACHE_DIR", tmp_path / "cutouts")
+def fresh(monkeypatch):
+    """Empty service state backed by an empty in-memory store."""
+    store = FakeStore()
+    monkeypatch.setattr(svc.service, "db", store)
     monkeypatch.setattr(svc.service, "_cov", {})
     monkeypatch.setattr(svc.service, "_inflight", {})
-    monkeypatch.setattr(svc.service, "_failures", {})
-    return tmp_path
+    monkeypatch.setattr(svc.service, "_aligned", svc.OrderedDict())
+    return store
 
 
 def seed_coverage(spec: TargetSpec) -> list[spherex.ImageRecord]:
-    """Save a finished coverage to disk, as a previous visit would have done: 2 visits, 3 detectors."""
+    """Store a finished coverage, as a previous visit would have done: 2 visits, 3 detectors."""
     recs = [rec("A_1", "D1", 60900.0), rec("A_2", "D2", 60900.1), rec("A_3", "D5", 60900.2),
             rec("B_1", "D1", 61100.0), rec("B_2", "D2", 61100.1)]
     wls = {"A_1-D1": 0.9, "A_2-D2": 1.3, "A_3-D5": 4.2, "B_1-D1": 0.95, "B_2-D2": 1.35}
@@ -361,3 +403,49 @@ def test_job_queue_runs_waiting_user_before_background_work():
     for f in (first, f_bg, f_user):
         f.result(5)
     assert order == ["user", "background"]
+
+
+# --- cache (in-memory store; the SQL itself is tested in test_db.py) --------------------------
+def test_downloaded_cutout_is_stored_and_reported_ready(fresh, monkeypatch):
+    spec = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    r = rec("A_1", "D2", 60900.0)
+    calls = []
+    monkeypatch.setattr(spherex, "download_cutout", lambda *a, **k: calls.append(1) or b"FITS")
+    assert svc.service.frame_states(spec, [r]) == ["missing"]
+    svc.service.ensure_cutout(spec, r, priority=0).result(5)
+    assert svc.service.frame_states(spec, [r]) == ["ready"]
+    assert svc.service.ensure_cutout(spec, r, priority=0) is None and len(calls) == 1  # served from the store
+    assert fresh.cutout(spherex.cutout_key(spherex.cutout_url(r, spec.center, spec.cutout_size))) == b"FITS"
+
+
+def test_outside_is_remembered_and_errors_cool_down(fresh, monkeypatch):
+    spec = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    outside, broken = rec("A_1", "D2", 60900.0), rec("A_2", "D2", 60900.0)
+
+    def download(record, *a, **k):
+        raise spherex.OutsideImageError("x") if record is outside else RuntimeError("503")
+
+    monkeypatch.setattr(spherex, "download_cutout", download)
+    for r in (outside, broken):
+        with pytest.raises(Exception):
+            svc.service.ensure_cutout(spec, r, priority=0).result(5)
+    assert svc.service.frame_states(spec, [outside, broken]) == ["outside", "failed"]
+    with pytest.raises(ApiError) as e:
+        svc.service.ensure_cutout(spec, outside, priority=0)
+    assert e.value.code == "outside_image"
+    monkeypatch.setattr(svc, "FAIL_COOLDOWN_S", 0.0)
+    assert svc.service.frame_states(spec, [broken]) == ["missing"]  # retried after the cooldown
+
+
+def test_collections_come_from_the_store_while_fresh_and_when_irsa_is_down(fresh, monkeypatch):
+    monkeypatch.setattr(spherex, "spherex_collections", lambda: ["spherex_dr1", "spherex_qr3"])
+    assert svc.service.collections() == ["spherex_dr1", "spherex_qr3"]
+
+    def down():
+        raise RuntimeError("502")
+
+    monkeypatch.setattr(spherex, "spherex_collections", down)
+    assert svc.service.collections() == ["spherex_dr1", "spherex_qr3"]  # still fresh: IRSA not asked
+    monkeypatch.setattr(svc, "COLLECTIONS_TTL_S", 0.0)
+    monkeypatch.setattr(svc.time, "sleep", lambda s: None)
+    assert svc.service.collections() == ["spherex_dr1", "spherex_qr3"]  # stale, IRSA down: last known list

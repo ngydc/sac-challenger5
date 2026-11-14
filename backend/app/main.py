@@ -1,9 +1,30 @@
+import logging
+from contextlib import asynccontextmanager
+
+import psycopg
+import psycopg_pool
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from . import db
 from .api import api_error_handler, router
 from .service import ApiError
+
+log = logging.getLogger("spherex.main")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    db.store.close()
+
+
+def database_error_handler(_request, exc: Exception) -> JSONResponse:
+    """The cache database (Postgres, see docker-compose.yml) is unreachable."""
+    log.error("database unavailable: %s", exc)
+    return JSONResponse(status_code=503, headers={"Retry-After": "10"},
+                        content={"error": {"code": "database_unavailable", "message": "the cache database is unreachable, retry later"}})
 
 
 def validation_error_handler(_request, exc: RequestValidationError) -> JSONResponse:
@@ -33,9 +54,11 @@ TAGS = [
     {"name": "3. Frames", "description": "One picture per request."},
 ]
 
-app = FastAPI(title="SAC Challenger API", description=DESCRIPTION, openapi_tags=TAGS)
+app = FastAPI(title="SAC Challenger API", description=DESCRIPTION, openapi_tags=TAGS, lifespan=lifespan)
 app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(psycopg.OperationalError, database_error_handler)
+app.add_exception_handler(psycopg_pool.PoolTimeout, database_error_handler)
 app.include_router(router)
 
 

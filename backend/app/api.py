@@ -266,16 +266,15 @@ def get_coverage(spec: TargetSpec = Depends(target_spec)) -> CoverageOut:
     newest visit of an object may be missing). Frames of one visit at different wavelengths were taken up to
     a few weeks apart."""
     cov = service.coverage(spec)
+    exposures = [e for e in cov.exposures if np.isfinite(e.wavelength_um)]  # else the target is off the detector
+    states = service.frame_states(spec, [e.record for e in exposures])
     frames: list[FrameOut] = []
-    for e in cov.exposures:
+    for e, state in zip(exposures, states):
         r = e.record
-        if not np.isfinite(e.wavelength_um):
-            continue  # the target falls outside the detector in this image
         fid = frame_id(r)
         frames.append(FrameOut(
             id=fid, visit=cov.visit_of[fid], detector=r.detector, wavelength_um=round(e.wavelength_um, 4),
-            bandwidth_um=round(e.bandwidth_um, 4), time=iso(r.t_mid_mjd), release=r.collection,
-            cache=service.frame_state(spec, r)))
+            bandwidth_um=round(e.bandwidth_um, 4), time=iso(r.t_mid_mjd), release=r.collection, cache=state))
     frames.sort(key=lambda f: (f.visit, f.wavelength_um))
 
     n_in_visit: dict[int, int] = {}

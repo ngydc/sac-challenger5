@@ -7,3 +7,5 @@ astroquery>=0.4.10
 reproject>=0.14
 matplotlib>=3.9,<4
 pillow>=10
+psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
