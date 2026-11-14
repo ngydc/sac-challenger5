@@ -1,0 +1,28 @@
+<svg [attr.viewBox]="'0 0 ' + W + ' ' + H" role="img" aria-label="Images of this band by season and wavelength">
+  <rect class="sel" [attr.x]="colX()" [attr.y]="M.t" [attr.width]="colWidth()" [attr.height]="H - M.t - M.b" />
+  @for (c of columns(); track c.index) {
+    <rect class="col" [attr.x]="c.x" [attr.y]="M.t" [attr.width]="colWidth()" [attr.height]="H - M.t - M.b" />
+    <text class="xl" [attr.x]="c.x + 4" [attr.y]="H - 6">{{ c.label }}</text>
+  }
+  @for (t of ticks(); track $index) {
+    <text class="yl" [attr.x]="M.l - 5" [attr.y]="t.y + 3">{{ t.label }}</text>
+  }
+  @for (d of dots(); track d.f.id) {
+    <circle
+      [class.ready]="d.f.cache === 'ready'"
+      [attr.cx]="d.x"
+      [attr.cy]="d.y"
+      r="3"
+      (click)="s.jumpTo(d.f)"
+    >
+      <title>{{ d.label }}</title>
+    </circle>
+  }
+  @if (current(); as c) {
+    <circle class="cur" [attr.cx]="c.x" [attr.cy]="c.y" r="7" />
+  }
+</svg>
+<p class="hint">
+  Each dot is one image of band {{ s.band()?.detector }} (x: season, y: wavelength in µm at the target).
+  <span class="g">Green</span> = loads instantly. Click a dot to jump to it.
+</p>

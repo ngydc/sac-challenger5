@@ -1,0 +1,59 @@
+:host {
+  display: block;
+}
+
+svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.col {
+  fill: none;
+  stroke: var(--border);
+}
+
+.sel {
+  fill: var(--accent-soft);
+}
+
+text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.yl {
+  text-anchor: end;
+}
+
+circle {
+  fill: #6b7280;
+  cursor: pointer;
+
+  &.ready {
+    fill: var(--accent);
+  }
+  &:hover {
+    r: 5;
+  }
+  &.cur {
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2;
+    pointer-events: none;
+  }
+}
+
+.hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.g {
+  color: var(--accent);
+}

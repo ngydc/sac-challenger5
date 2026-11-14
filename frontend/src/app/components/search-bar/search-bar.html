@@ -1,0 +1,21 @@
+<form role="search" (submit)="submit($event)">
+  <label for="q" class="sr-only">Object name or coordinates</label>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+  <input
+    id="q"
+    type="search"
+    autocomplete="off"
+    spellcheck="false"
+    placeholder="Barnard's Star  or  17h57m48.5s +04d41m36s"
+    maxlength="120"
+    [value]="text()"
+    (input)="text.set($any($event.target).value)"
+  />
+  <button type="submit" class="btn" [disabled]="!text().trim() || s.phase() === 'resolving'">
+    @if (s.phase() === 'resolving') {
+      <span class="spinner"></span>
+    } @else {
+      Show
+    }
+  </button>
+</form>

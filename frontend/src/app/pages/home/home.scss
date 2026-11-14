@@ -1,3 +1,215 @@
-.muted {
+:host {
+  display: block;
+  height: 100%;
+}
+
+.layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- the stage: the picture uses all space between the top bar and the HUD ---- */
+.stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 68px 16px 72px;
+  background: radial-gradient(ellipse at center, #121620 0%, var(--bg) 70%);
+}
+
+.top {
+  position: absolute;
+  inset: 12px 16px auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  pointer-events: none;
+
+  > * {
+    pointer-events: auto;
+  }
+}
+
+.brand {
+  padding-top: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px #000;
+}
+
+.hud {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: calc(100% - 32px - 140px);
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--overlay);
+  backdrop-filter: blur(8px);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  white-space: nowrap;
+
+  span {
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.play {
+  min-width: 88px;
+}
+
+.toggle {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  min-height: 48px;
+  border-radius: 12px;
+  background: var(--overlay);
+  backdrop-filter: blur(8px);
+
+  svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+  }
+}
+
+/* ---- the menu: side drawer on wide screens ---- */
+.drawer {
+  flex: none;
+  width: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  transition: width 0.25s ease;
+}
+
+/* Fixed width so the content does not reflow while the drawer slides; it scrolls on its own. */
+.drawer-inner {
+  width: var(--drawer-w);
+  height: 100%;
+  padding: 0 1.1rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.open .drawer {
+  width: var(--drawer-w);
+}
+
+.drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 1rem 0 0.75rem;
+  background: var(--surface);
+
+  .btn {
+    flex: none;
+    align-self: flex-start;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 1.15rem;
+  }
+  p {
+    margin: 0.2rem 0 0;
+    font-size: 0.8rem;
+  }
+  .warn {
+    color: var(--warn);
+  }
+}
+
+.ack {
+  margin-top: 1.25rem;
+  padding-bottom: 1rem;
+  font-size: 0.7rem;
   color: var(--muted);
+  line-height: 1.5;
+
+  a {
+    color: inherit;
+  }
+}
+
+/* ---- phones and small tablets: bottom sheet over the picture ---- */
+@media (max-width: 899px) {
+  .drawer {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 10;
+    width: 100% !important;
+    max-height: 72dvh;
+    border: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow);
+    transform: translateY(105%);
+    transition: transform 0.25s ease;
+  }
+
+  .drawer-inner {
+    width: 100%;
+    max-height: 72dvh;
+  }
+
+  .open .drawer {
+    transform: none;
+  }
+}
+
+@media (max-width: 599px) {
+  .stage {
+    padding: 64px 8px 128px;
+  }
+  .brand,
+  .lbl,
+  .fs {
+    display: none;
+  }
+  .top {
+    inset: 10px 10px auto;
+  }
+  .hud {
+    left: 10px;
+    right: 10px;
+    bottom: 70px;
+    max-width: none;
+  }
+  .info {
+    flex: 1;
+  }
+  .play {
+    min-width: 48px;
+  }
+  .toggle {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+
+    .lbl {
+      display: inline;
+    }
+  }
 }
