@@ -28,6 +28,7 @@ yarn-error.log*
 # --- Local data and caches (downloaded SPHEREx FITS, cutout cache) ---
 backend/cache/
 backend/data/
+backend/out/
 *.fits
 *.fits.gz
 

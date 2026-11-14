@@ -12,6 +12,7 @@ Challenge: https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spher
 
 - [Project overview](docs/PROJECT_OVERVIEW.md): goal, test targets, features, risks, MVP checklist
 - [Resources](docs/RESOURCES.md): SPHEREx data format, how to get the data from IRSA, test results
+- [Backend API](docs/API.md): the endpoints the frontend uses (sliders, frames), with live docs at `/docs` when the backend runs
 
 ## Stack
 
@@ -34,6 +35,8 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --reload   # http://localhost:8000  (API docs at /docs)
 ```
+
+The backend caches everything (search results, cutouts, calibration files) in Postgres. Outside Docker, start just the database with `docker compose up -d db`; the backend connects to it on `localhost:5432` by default (override with `DATABASE_URL`) and creates its tables itself (`backend/app/schema.sql`). An old `backend/cache/` folder can be imported once with `python -m scripts.import_file_cache` and then deleted.
 
 **Frontend** (Angular 22, local)
 ```bash
