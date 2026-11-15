@@ -141,6 +141,10 @@ class ColourEpoch(_Open):
     n_channels: int
     masked_fraction: float | None = Field(None, description="Share of the covered pixels that are masked (grey).")
     covered_fraction: float | None = None
+    target_xy: list[float | None] | None = Field(
+        None, description="Predicted target position at the epoch's median time, `[x, y]` in picture pixels: x from the left, "
+                          "y from the bottom, like the viewer's `X-Target-X`/`X-Target-Y`. May lie outside the picture. "
+                          "Absent for an epoch without a time.")
 
 
 class Colour(_Open):
@@ -149,7 +153,7 @@ class Colour(_Open):
     usable_epochs: list[int]
     epochs: list[ColourEpoch]
     white_balance: list[float | None] | None = None
-    stretch: dict | None = None
+    stretch: Stretch | None = Field(None, description="The one brightness scale of every epoch's picture (`unit` is not set).")
     note: str
 
 
