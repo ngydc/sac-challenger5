@@ -127,6 +127,7 @@ Status: **planned** (agreed, not built), **in progress**, **done**. New features
 | F6 | Blink / wavelength sweep playback, keyboard shortcuts | done |
 | F7 | Frame details, stretch, mask, predicted-position ring, field of view (in the menu) | done |
 | F8 | Shareable page URL (`?q=&fov=&visit=&wl=`) | done |
+| F9 | Deep Analysis drawer: difference pictures per detector / all combined, status and compute on click, explanation, spectrum, metadata | done |
 
 F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. a side drawer or overlay) that is closed or small by default, so the visualization stays the focus. The menu is built so that more controls can be added later.
 
@@ -167,6 +168,18 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 - The visualization always uses the available space and keeps its aspect ratio.
 - On small screens the slider menu opens as an overlay or bottom sheet instead of a side bar; controls are large enough for touch.
 - Sliders and the search bar must work with mouse, touch and keyboard.
+
+### F9: Deep Analysis (difference pictures)
+
+A second drawer on the main page, opened with the **Deep Analysis** button above **Controls** and working the same way (side drawer from 900 px, bottom sheet below; only one of the two drawers is open at a time). Built against `docs/API_EPOCHS.md` (`/api/config`, `/api/epochs`, `/api/compute`, `/api/diff`, `/api/spectrum`).
+
+- **What it shows:** only the difference pictures (latest minus first epoch), **per detector** (default) or **all combined**. While the drawer is open, the stage shows the difference tiles instead of the slider picture and the slider HUD and keys are off. Click a tile to enlarge it with its metadata; click a pixel for its spectrum per epoch.
+- **Position:** the object searched on the main page (`GET /api/resolve` result), with the epoch maps' own field of view (`default_fov` from `/api/config`), because that is what the precomputed results use. For the five test targets this hits the precomputed cache.
+- **Only the start button computes.** Opening the drawer calls `GET /api/epochs`. A computed result (e.g. the five examples) or a computation already running is shown at once, without a button. Otherwise the drawer shows **"Start deep analysis (downloads data)"** with a notice that it takes tens of minutes; that click calls `POST /api/compute`, then the drawer polls every 4 s, shows progress and the remaining time (measured rate after 60 s, before that the documented ~20 images/min) and the stage adds each detector as it is ready.
+- **Colours:** red = brighter in the first epoch, blue = brighter in the latest, white = unchanged (backend since `PIPELINE_VERSION` 8). A moving object shows red where it was and blue where it went. No data (transparent) is drawn hatched, never black. The frontend never rescales brightness.
+- **Explanation:** collapsible block in the drawer ("?" in the drawer head reopens it), with one sentence per test target from `core/examples.ts` (`seen`, written from the precomputed pictures; update it when they change). Acknowledgement text and release DOIs at the end of the drawer.
+- Not in the URL yet (the main page writes `?q=&fov=&visit=&wl=` itself).
+- Code: `components/epochs/` (`deep-panel`, `deep-stage`, `bundle-tile`, `bundle-detail`, `spectrum-panel`, `sky-image`, `epoch-legend`, `site-footer`), `core/services/epochs-store.service.ts`, `core/services/epochs-api.service.ts`, `core/models/epochs.models.ts`; shared styles in `src/styles/_epochs.scss`; wiring in `pages/home/`.
 
 ### Possible later features
 
@@ -249,3 +262,4 @@ The frontend starts without the backend, but all `/api` calls fail until the bac
 | 2026-11-14 | First version: architecture, tech stack, features F1-F5. |
 | 2026-11-14 | Video player removed. Sliders reduced to two: time slider (F2) and wavelength slider 1-102 (F3); RGB, band count, RA and Dec sliders removed. |
 | 2026-11-14 | Implemented F1-F8 against `docs/API.md`; F3 changed to a continuous µm slider. |
+| 2026-11-15 | F9 Deep Analysis drawer (difference pictures) next to Controls; the slider viewer stays the main page. |

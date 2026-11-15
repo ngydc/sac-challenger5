@@ -95,7 +95,7 @@ PNG of the epoch RGB; the response header `X-Epoch-Mode` carries the mode. In `o
 | `has_image`, `has_diff`, `diff`, `stretch` | whether the pictures exist, and their scales |
 
 ### `GET /api/diff?ra&dec[&fov]&bundle[&scale]`
-PNG of (last − first usable epoch) in units of the noise: red = brighter in the last epoch, blue = fainter, white = unchanged. The scale ends at ± `diff.clip_sigma`. The noise includes 15 % of the pixel's own brightness (`diff.relative_floor`), because pixels of unchanged stars differ that much between epochs; so a star must change by clearly more than 15 % to show up.
+PNG of (last − first usable epoch) in units of the noise: blue = brighter in the last epoch, red = fainter (brighter in the first), white = unchanged. Same convention as the epoch RGB (red = earliest, blue = latest): a moving star leaves red where it was and blue where it is now. The scale ends at ± `diff.clip_sigma`. The noise includes 15 % of the pixel's own brightness (`diff.relative_floor`), because pixels of unchanged stars differ that much between epochs; so a star must change by clearly more than 15 % to show up.
 
 ### `GET /api/spectrum?ra&dec[&fov]&x&y`
 `x`, `y`: pixel in the PNG at scale 1 (x from the left, y from the top). Returns `unit`, `epochs[]` and `channels[]`, each channel with `detector`, `channel`, `wavelength_um`, `wl_min_um`, `wl_max_um` and `epochs[]` of `{epoch, value, sigma, n}` (`value` is `null` where nothing was measured).

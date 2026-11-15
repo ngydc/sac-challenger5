@@ -68,7 +68,7 @@ STRETCH_HI_PERCENTILE = 99.7
 STATUS_STALE_S = 180.0  # a "running" status file not updated for this long belongs to a dead process
 SKY_FRACTION = 0.1  # the darkest 10 % of the field count as sky (see `dark_sky`)
 REPROJ_VERSION = 1  # bump when `reproject_cutout` changes: cached reprojections are then redone
-PIPELINE_VERSION = 7  # bump when anything after the reprojection changes: products are then redone
+PIPELINE_VERSION = 8  # bump when anything after the reprojection changes: products are then redone
 
 # Flags that make a pixel unusable here, by NAME (bit numbers come from each file's FLAGS header).
 # Chosen from Table 16 of the Explanatory Supplement: everything described as unusable, erroneous, saturated
@@ -453,11 +453,12 @@ def _rgba(channels: list[np.ndarray], valid: np.ndarray) -> np.ndarray:
 
 
 def diff_rgba(z: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Sign-true colours: brighter in the last epoch = red, fainter = blue, unchanged = white."""
+    """Sign-true colours: brighter in the last epoch = blue, fainter = red, unchanged = white. Same convention as the
+    epoch RGB (red = earliest, blue = latest): a moving star leaves red where it was and blue where it is now."""
     from matplotlib import colormaps
 
     t = np.clip(np.nan_to_num(z, nan=0.0) / DIFF_CLIP_SIGMA, -1, 1) * 0.5 + 0.5
-    out = np.rint(255 * colormaps["RdBu_r"](t)).astype(np.uint8)
+    out = np.rint(255 * colormaps["RdBu"](t)).astype(np.uint8)
     out[..., 3] = np.where(valid, 255, 0)
     out[~valid, :3] = 0
     return out
@@ -585,7 +586,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
                                           "(unchanged stars differ that much between epochs)",
                             "relative_floor": DIFF_RELATIVE_FLOOR,
                             "empirical_scale": _num(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
-                            "colours": "red = brighter in the last epoch, blue = fainter, white = unchanged"}
+                            "colours": "blue = brighter in the last epoch, red = fainter (brighter in the first), white = unchanged"}
 
     used = [c for c in range(C) if common[c].any()]
     meta["channels"] = [chan_info[c] for c in used]

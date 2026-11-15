@@ -1,4 +1,5 @@
 /* Global styles and color tokens (dark theme). Shared controls live here to keep component styles small. */
+@use 'styles/epochs';
 :root {
   --bg: #0b0d12;
   --fg: #e6e8ee;
