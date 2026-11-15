@@ -233,3 +233,18 @@ img {
 .warn {
   color: var(--warn);
 }
+
+/* ---- colour mode: status messages inside the frame ---- */
+.first {
+  padding: 1rem;
+  text-align: center;
+
+  p {
+    max-width: 38ch;
+    margin: 0;
+  }
+  .bar {
+    width: min(240px, 60cqw);
+    margin-top: 0;
+  }
+}
