@@ -266,7 +266,9 @@ def test_resolve_input_errors():
 
 # --- the contract is exactly the MVP ---------------------------------------------------------
 def test_only_the_three_mvp_endpoints_exist():
-    paths = set(app.openapi()["paths"])
+    # the epoch-map endpoints (app/epochs_api.py, tests in test_epochs.py) are a separate group
+    paths = {p for p, ops in app.openapi()["paths"].items()
+             if not all("4. Epoch maps" in op.get("tags", []) for op in ops.values())}
     assert paths == {"/api/resolve", "/api/coverage", "/api/frames/{frame_id}/image.png"}
     for gone in ("/api/presets", "/api/status", "/api/frames/A-D1/pixels"):
         assert client.get(gone).status_code == 404
