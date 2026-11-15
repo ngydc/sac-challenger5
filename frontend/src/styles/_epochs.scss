@@ -658,6 +658,105 @@ dialog.detail {
   }
 }
 
+/* All | D1 | … : same look as Linear | Asinh; wraps rather than overflowing */
+.seg.dets {
+  flex-wrap: wrap;
+  max-width: 100%;
+
+  .btn {
+    flex: 0 0 auto;
+    padding: 0.25rem 0.55rem;
+  }
+  /* the detector of the picture beside the panel: a small dot under its name */
+  .btn.shown:not(.active) {
+    box-shadow: inset 0 -2px 0 rgb(143 176 255 / 0.55);
+  }
+}
+
+/* the picker on narrow panels */
+.det-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+
+  select {
+    min-height: 30px;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.8rem;
+  }
+}
+
+.spectrum > .legend .none {
+  opacity: 0.4;
+}
+
+/* epochs of the picture's pair, and switches for the others */
+.spectrum > .legend {
+  .role {
+    color: var(--muted);
+  }
+  .extra label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 24px;
+    cursor: pointer;
+  }
+  .extra input {
+    margin: 0;
+    width: 14px;
+    height: 14px;
+    accent-color: var(--primary);
+    cursor: inherit;
+  }
+  .extra input:focus-visible {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+  }
+  .extra input:disabled {
+    cursor: not-allowed;
+  }
+  .extra.off > label {
+    color: var(--muted);
+  }
+  .extra.off .sw {
+    opacity: 0.6;
+  }
+}
+/* the words "Blue" and "red" in the intro, in the line colours */
+.c-later {
+  color: #5d9ff0;
+}
+.c-earlier {
+  color: #ec8585;
+}
+.table-view th .sw {
+  width: 10px;
+  height: 10px;
+  margin-right: 0.25rem;
+}
+
+/* "Zoomed in on D4 … ← Show all detectors" */
+.zoom-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 0.8rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--fg);
+
+  .btn {
+    flex: none;
+    min-height: 30px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.8rem;
+  }
+}
+
 .chart-box {
   width: 100%;
   min-width: 0;
@@ -675,6 +774,18 @@ dialog.detail {
     &.alt {
       fill: rgb(140 155 255 / 0.085);
     }
+    &.pickable {
+      cursor: zoom-in;
+    }
+    &.pickable:hover {
+      fill: rgb(140 155 255 / 0.14);
+    }
+    /* the detector of the picture: a little brighter, with a thin top edge (no filtering) */
+    &.shown {
+      fill: rgb(143 176 255 / 0.17);
+      stroke: rgb(143 176 255 / 0.45);
+      stroke-width: 1;
+    }
   }
   .band-label {
     fill: var(--muted);
@@ -682,6 +793,20 @@ dialog.detail {
     font-weight: 600;
     letter-spacing: 0.02em;
     cursor: help;
+
+    &.pickable {
+      cursor: zoom-in;
+    }
+    &.pickable:hover,
+    &.shown {
+      fill: var(--accent);
+    }
+    &.empty {
+      opacity: 0.5;
+    }
+  }
+  polyline {
+    pointer-events: none; /* clicks go through to the stripe below */
   }
   .grid {
     stroke: var(--border);

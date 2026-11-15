@@ -1,3 +1,0 @@
-- dynamically update the cached image indicator in frontend
-- adjust loading bars to current data fetching state
-- add button for home page
