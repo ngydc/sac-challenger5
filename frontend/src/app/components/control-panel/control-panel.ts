@@ -1,7 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Stretch, ViewerState } from '../../core/services/viewer-state.service';
-import { Band } from '../../core/utils/frames';
+import { framesOfVisit } from '../../core/utils/frames';
 import { FramePlot } from '../frame-plot/frame-plot';
 
 /** F2 + F3: the time and wavelength sliders, playback, frame details and display settings. */
@@ -40,9 +40,21 @@ export class ControlPanel {
     this.s.stretch.set((e.target as HTMLSelectElement).value as Stretch);
   }
 
-  protected selectBand(b: Band): void {
-    // Keep the position inside the band if the user is already there, else go to its middle.
-    const w = this.s.wavelength();
-    if (w < b.min || w > b.max) this.s.setWavelength((b.min + b.max) / 2);
+  /** Position of the shown image among the season's images, sorted by wavelength (for the step buttons). */
+  protected readonly frameIndex = computed(() => {
+    const list = framesOfVisit(this.s.frames(), this.s.visit());
+    const id = this.s.pick()?.frame.id;
+    return { i: list.findIndex((f) => f.id === id), n: list.length };
+  });
+
+  /** The arrow buttons under the sliders: one step, and stop playback so the step is not overwritten. */
+  protected stepVisit(d: number): void {
+    this.s.stop();
+    this.s.stepVisit(d);
+  }
+
+  protected stepFrame(d: number): void {
+    this.s.stop();
+    this.s.stepFrame(d);
   }
 }

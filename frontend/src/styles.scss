@@ -10,12 +10,13 @@
   --surface-2: #121733;
   --surface-3: #1a2046;
   --overlay: rgb(9 12 30 / 0.72);
-  --accent: #8b9bff;
-  --accent-2: #4fd8ff;
-  --accent-3: #c084fc;
-  --accent-soft: rgb(139 155 255 / 0.16);
-  --grad: linear-gradient(120deg, var(--accent-2), var(--accent) 50%, var(--accent-3));
-  --glow: 0 0 0 1px var(--border-strong), 0 0 24px rgb(139 155 255 / 0.22);
+  /* One calm blue for everything interactive (buttons, sliders, focus); no gradients, no glows. */
+  --primary: #3b7cf0;
+  --primary-hover: #5590f5;
+  --accent: #8fb0ff; /* blue for text on dark: labels, kickers, links */
+  --accent-2: var(--accent);
+  --accent-soft: rgb(59 124 240 / 0.16);
+  --slider: var(--primary);
   --ready: #3ee6a0;
   --ring: #ff5d73;
   --warn: #ffc857;
@@ -64,7 +65,7 @@ a {
 }
 
 ::selection {
-  background: rgb(139 155 255 / 0.4);
+  background: rgb(59 124 240 / 0.45);
 }
 
 * {
@@ -73,7 +74,7 @@ a {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent-2);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -99,13 +100,6 @@ a {
   color: var(--accent);
 }
 
-.grad-text {
-  background: var(--grad);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-}
-
 .glass {
   border: 1px solid var(--border);
   background: var(--overlay);
@@ -122,17 +116,15 @@ a {
   white-space: nowrap;
 }
 
-/* ---- the sky behind everything: nebula glow plus two star layers, one of them twinkling ---- */
+/* ---- the sky behind everything: a faint tint plus two star layers, one of them twinkling ---- */
 .sky {
   position: absolute;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 55% 45% at 82% 8%, rgb(124 92 255 / 0.2), transparent 70%),
-    radial-gradient(ellipse 50% 45% at 8% 92%, rgb(40 170 255 / 0.13), transparent 70%),
-    radial-gradient(ellipse 40% 30% at 35% 30%, rgb(192 132 252 / 0.06), transparent 70%),
-    radial-gradient(ellipse at center, #0a0e24 0%, var(--bg) 78%);
+    radial-gradient(ellipse 60% 50% at 80% 5%, rgb(59 124 240 / 0.08), transparent 70%),
+    radial-gradient(ellipse at center, #090c1c 0%, var(--bg) 78%);
 
   &::before,
   &::after {
@@ -189,36 +181,29 @@ a {
   cursor: pointer;
   transition:
     background 0.15s,
-    border-color 0.15s,
-    box-shadow 0.15s,
-    transform 0.1s;
+    border-color 0.15s;
 
   &:hover:not(:disabled) {
     border-color: var(--border-strong);
     background: var(--surface-3);
-    box-shadow: 0 0 18px rgb(139 155 255 / 0.18);
-  }
-  &:active:not(:disabled) {
-    transform: scale(0.97);
   }
   &:disabled {
     opacity: 0.4;
     cursor: default;
   }
   &.active {
-    border-color: var(--accent);
+    border-color: var(--primary);
     background: var(--accent-soft);
-    box-shadow: var(--glow);
   }
   &.primary {
     border-color: transparent;
-    background: var(--grad);
-    color: #060818;
+    background: var(--primary);
+    color: #fff;
     font-weight: 600;
 
     &:hover:not(:disabled) {
-      background: var(--grad);
-      filter: brightness(1.12);
+      border-color: transparent;
+      background: var(--primary-hover);
     }
   }
   &.ghost {
@@ -234,7 +219,7 @@ a {
 /* ---- range slider ---- */
 input[type='range'] {
   --pct: 0%;
-  --track: linear-gradient(to right, var(--accent-2), var(--accent) var(--pct), var(--surface-3) var(--pct));
+  --track: linear-gradient(to right, var(--primary) var(--pct), var(--surface-3) var(--pct));
   width: 100%;
   height: 28px;
   margin: 0;
@@ -253,26 +238,20 @@ input[type='range'] {
     background: var(--track);
   }
   &::-webkit-slider-thumb {
-    width: 20px;
-    height: 20px;
-    margin-top: -7.5px;
-    border: 2px solid #fff;
+    width: 18px;
+    height: 18px;
+    margin-top: -6.5px;
+    border: 3px solid var(--primary);
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px rgb(139 155 255 / 0.8);
+    background: #fff;
     appearance: none;
-    transition: transform 0.1s;
   }
   &::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #fff;
+    width: 12px;
+    height: 12px;
+    border: 3px solid var(--primary);
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px rgb(139 155 255 / 0.8);
-  }
-  &:active::-webkit-slider-thumb {
-    transform: scale(1.15);
+    background: #fff;
   }
   &:disabled {
     opacity: 0.4;
@@ -295,7 +274,7 @@ input[type='search'] {
 input[type='checkbox'] {
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
+  accent-color: var(--primary);
 }
 
 @media (prefers-reduced-motion: reduce) {

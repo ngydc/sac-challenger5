@@ -35,10 +35,9 @@ circle {
   cursor: pointer;
   transition: fill 0.4s;
 
-  /* Loaded: green and glowing. */
+  /* Loaded: green. */
   &.ready {
     fill: var(--ready);
-    filter: drop-shadow(0 0 3px var(--ready));
   }
   /* Being loaded right now. */
   &.busy {
@@ -53,7 +52,6 @@ circle {
     stroke: #fff;
     stroke-width: 2;
     pointer-events: none;
-    filter: drop-shadow(0 0 4px #fff);
   }
 }
 

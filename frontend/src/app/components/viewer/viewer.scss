@@ -27,6 +27,9 @@
     letter-spacing: -0.03em;
     text-wrap: balance;
   }
+  .second {
+    color: var(--accent);
+  }
 }
 
 .lede {
@@ -38,12 +41,21 @@
   text-wrap: pretty;
 }
 
+.start {
+  margin-top: 0.75rem;
+
+  p {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+}
+
 .examples {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
 
   .btn {
     border-radius: 999px;
@@ -74,10 +86,7 @@
   /* As large as possible while keeping the aspect ratio (both 100cqw and 100cqh fit). */
   width: min(100cqw - 2px, 100cqh - 2px);
   background: var(--surface);
-  box-shadow:
-    0 0 0 1px var(--border-strong),
-    0 0 70px rgb(124 140 255 / 0.16),
-    var(--shadow);
+  box-shadow: 0 0 0 1px var(--border-strong);
   overflow: hidden;
 }
 
@@ -96,9 +105,7 @@ img {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.5),
-    0 0 10px var(--ring);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6); /* keeps the ring visible on bright stars */
 }
 
 .dir {
@@ -220,8 +227,7 @@ img {
     display: block;
     height: 100%;
     border-radius: 3px;
-    background: var(--grad);
-    box-shadow: 0 0 12px var(--accent);
+    background: var(--primary);
     transition: width 0.4s;
   }
 }
