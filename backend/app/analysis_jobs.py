@@ -475,7 +475,7 @@ class AnalysisService:
         _write_json(out / "meta.json", meta)
 
     def _store_colour(self, out: Path, meta: dict, spec: TargetSpec, grid, I, V, N, chan_info, epochs) -> None:
-        cmeta, _, pngs = analysis.colour_composite(I, V, N, chan_info, epochs)
+        cmeta, pngs = analysis.colour_composite(I, V, N, chan_info, epochs)
         for ce in cmeta["epochs"]:  # predicted target position at the epoch's median time, as the viewer's X-Target-X/Y
             if ce.get("time"):
                 tx, ty = grid.world_to_pixel(spec.at(Time(ce["time"]).mjd))

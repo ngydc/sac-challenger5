@@ -257,7 +257,7 @@ def colour_case(rng):
 
 def test_colour_composite_white_stars_red_star_and_masks():
     I, V, N, info8, epochs, Hc = colour_case(np.random.default_rng(5))
-    meta, arr, pngs = analysis.colour_composite(I, V, N, info8, epochs)
+    meta, pngs = analysis.colour_composite(I, V, N, info8, epochs)
     assert meta["usable_epochs"] == [0, 1] and sorted(pngs) == ["colour_e0.png", "colour_e1.png"]
     assert not meta["epochs"][2]["usable"] and meta["epochs"][2]["n_channels"] == 3
     assert meta["spikes_rejected"] >= 1
@@ -288,7 +288,7 @@ def test_colour_composite_no_data_is_transparent_and_too_few_channels_give_nothi
     I, V, N, info8, epochs, Hc = colour_case(np.random.default_rng(6))
     I[1][:, :, :5] = np.nan  # epoch 1: the left 5 columns have no data at all
     N[1][:, :, :5] = 0
-    meta, _, pngs = analysis.colour_composite(I, V, N, info8, epochs)
+    meta, pngs = analysis.colour_composite(I, V, N, info8, epochs)
     assert rgba(pngs["colour_e1.png"])[20, 2, 3] == 0 and rgba(pngs["colour_e0.png"])[20, 2, 3] == 255
-    meta, _, pngs = analysis.colour_composite(I[2:], V[2:], N[2:], info8, epochs[2:])
+    meta, pngs = analysis.colour_composite(I[2:], V[2:], N[2:], info8, epochs[2:])
     assert meta["usable_epochs"] == [] and pngs == {} and meta["stretch"] is None

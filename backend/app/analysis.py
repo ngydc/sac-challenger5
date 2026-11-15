@@ -546,7 +546,7 @@ def _filled(have: np.ndarray, size: int) -> np.ndarray:
 
 
 def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: list[dict], epochs: list[dict]
-                     ) -> tuple[dict, dict[str, np.ndarray], dict[str, bytes]]:
+                     ) -> tuple[dict, dict[str, bytes]]:
     """Every wavelength of one epoch in one colour picture, for every epoch that covers enough channels.
 
     I, V, N: (E, C, H, W) per epoch and channel of ALL detectors (step 7a), sky-subtracted per exposure.
@@ -564,7 +564,7 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
        Unusual colours then mean an unusual spectrum: red = brighter at long wavelengths than a typical star.
     4. ONE brightness stretch (asinh) for every epoch, on the brightness (r + g + b) / 3; the colour of each
        pixel is kept. Faint pixels fade to grey, so sky noise does not become coloured speckle.
-    Returns (metadata, arrays, PNG files by name "colour_e<epoch>.png")."""
+    Returns (metadata, PNG files by name "colour_e<epoch>.png")."""
     E, C, H, W = I.shape
     wl = np.array([c["wavelength_um"] if c.get("wavelength_um") is not None else
                    0.5 * (c["wl_min_um"] + c["wl_max_um"]) for c in chan_info], float)
@@ -612,7 +612,6 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
                                "wl_min_um": c.get("wl_min_um"), "wl_max_um": c.get("wl_max_um"), "colour": _hex(ramp[i])}
                               for i, c in enumerate(chan_info)],
                   "mask_colour": _hex(np.array(COLOUR_MASK_RGB) / 255), "usable_epochs": usable, "epochs": []}
-    arrays: dict[str, np.ndarray] = {}
     pngs: dict[str, bytes] = {}
 
     def epoch_meta(e: int) -> dict:
@@ -626,7 +625,7 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
     if not usable:
         meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": None, "stretch": None,
                       "note": "No epoch covers enough wavelengths for a colour picture."})
-        return meta, arrays, pngs
+        return meta, pngs
 
     # sky level per epoch and colour, on one common set of source-free pixels (as in make_bundle, step 8)
     lum = np.nanmean(comp[usable], axis=(0, 1))
@@ -680,14 +679,13 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
         out[..., 3] = np.where(valid, 255, 0)  # no data: transparent
         out[masked[e]] = (*COLOUR_MASK_RGB, 255)
         pngs[f"colour_e{e}.png"] = _png(out)
-    arrays["colour"] = comp
 
     meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": [json_number(g, 4) for g in gains],
                  "stretch": {"kind": "asinh", "black": 0.0, "white": json_number(white), "noise": json_number(sigma)},
                  "note": "Every wavelength of one season in one picture: short wavelengths blue, long ones red, "
                          "balanced so that typical stars are white. One brightness scale for every season. "
                          "Grey pixels are masked (saturated or flagged in some wavelengths); transparent = no data."})
-    return meta, arrays, pngs
+    return meta, pngs
 
 
 def _gaps(meta: dict, covered: float | None) -> list[str]:
