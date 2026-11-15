@@ -82,6 +82,8 @@ import { SpectrumPanel } from './spectrum-panel';
                     [x]="p.x"
                     [y]="p.y"
                     [height]="grid().height"
+                    [highlight]="b.kind === 'detector' && b.detectors.length === 1 ? b.detectors[0] : null"
+                    [pair]="pair()"
                     (closed)="s.pick.set(null)"
                   />
                 }
@@ -170,12 +172,17 @@ export class BundleDetail {
     const u = this.used();
     return u.length ? fmtRange(u[0].start, u[u.length - 1].end) : '–';
   });
+  /** The two epochs the shown picture compares (null = no picture); the spectrum colours them blue and red. */
+  protected readonly pair = computed(() => {
+    const b = this.s.detailBundle();
+    return b ? diffPair(b, this.s.diffStep()) : null;
+  });
   protected readonly src = computed(() => {
     const b = this.s.detailBundle();
     const p = this.s.position();
     if (!b || !p) return null;
     const step = this.s.diffStep();
-    return diffPair(b, step) ? this.api.diffUrl(p, b.id, this.s.version(), step) : null;
+    return this.pair() ? this.api.diffUrl(p, b.id, this.s.version(), step) : null;
   });
   protected readonly label = computed(() => stepLabel(this.s.diffStep()));
   protected readonly missing = computed(() => {
