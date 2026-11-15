@@ -8,6 +8,9 @@ const M = { l: 36, r: 8, t: 10, b: 22 };
 
 interface Dot {
   f: Frame;
+  /** Loaded (green) or being loaded right now (pulsing); read live from the state. */
+  ready: boolean;
+  busy: boolean;
   x: number;
   y: number;
   label: string;
@@ -15,7 +18,8 @@ interface Dot {
 
 /**
  * Every image of the current band: x = season (spread by date inside it), y = wavelength at the
- * target. Clicking a dot jumps to that image.
+ * target. Clicking a dot jumps to that image. A dot is green as soon as its image is loaded:
+ * `cacheOf` changes while images arrive, so the dots follow without a reload.
  */
 @Component({
   selector: 'app-frame-plot',
@@ -66,8 +70,11 @@ export class FramePlot {
         const t0 = Date.parse(v.start);
         const span = Date.parse(v.end) + 86_400_000 - t0;
         const rel = span > 0 ? (Date.parse(f.time) - t0) / span : 0.5;
+        const cache = this.s.cacheOf(f);
         return {
           f,
+          ready: cache === 'ready',
+          busy: cache === 'fetching' || cache === 'queued',
           x: M.l + f.visit * cw + 8 + Math.min(1, Math.max(0, rel)) * (cw - 16),
           y: this.y(f.wavelength_um),
           label: `${f.wavelength_um.toFixed(3)} µm · ${f.time.slice(0, 10)}`,

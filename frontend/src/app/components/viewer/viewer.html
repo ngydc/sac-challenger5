@@ -1,23 +1,28 @@
 @switch (s.phase()) {
   @case ('idle') {
-    <div class="panel intro">
-      <h1>SPHEREx Blink</h1>
-      <p class="muted">
-        Type an object name or sky coordinates. The tool shows every SPHEREx image of that spot,
-        so you can blink through time and scan through wavelength to find what moves or changes.
+    <section class="hero">
+      <app-logo [size]="76" />
+      <p class="kicker">Challenger5 · SPHEREx infrared sky explorer</p>
+      <h1>Visualize the known.<br /><span class="grad-text">Challenge the unknown.</span></h1>
+      <p class="lede">
+        Discover what lies hidden beneath the starlit sky. Enter an object or sky coordinates and
+        blink through every SPHEREx observation of that position, across time and infrared
+        wavelength, to reveal what moves and what changes.
       </p>
-      <div class="examples">
-        @for (e of examples; track e) {
-          <button type="button" class="btn" (click)="s.search(e)">{{ e }}</button>
+      <div class="examples" role="group" aria-label="Example targets">
+        @for (e of examples; track e.name) {
+          <button type="button" class="btn" (click)="s.search(e.name)">{{ e.name }}</button>
         }
       </div>
-    </div>
+      <p class="credit">NASA Space Apps Challenge 2026 · Data: SPHEREx (NASA/JPL-Caltech) via IRSA</p>
+    </section>
   }
   @case ('failed') {
-    <div class="panel" role="alert">
+    <div class="panel glass" role="alert">
+      <p class="kicker">No result</p>
       <h2>Nothing to show</h2>
       <p>{{ s.error() }}</p>
-      <p class="muted">Check the spelling, or type coordinates such as <code>17h57m48.5s +04d41m36s</code>.</p>
+      <p class="muted">Check the spelling, or type coordinates such as <code class="num">17h57m48.5s +04d41m36s</code>.</p>
     </div>
   }
   @case ('ready') {
@@ -25,47 +30,53 @@
       @if (s.picture(); as p) {
         <img
           [src]="p.url"
-          [class.dim]="s.loading()"
           [alt]="'SPHEREx image at ' + p.wavelength.toFixed(3) + ' µm, ' + (p.time | date: 'yyyy-MM-dd' : 'UTC')"
           draggable="false"
         />
-      }
-      @if (ring(); as r) {
-        <span class="ring" [style.left.%]="r.left" [style.top.%]="r.top" [style.width.%]="r.d"></span>
-      }
-      <span class="dir n" aria-hidden="true">N</span>
-      <span class="dir e" aria-hidden="true">E</span>
-      @if (s.loading()) {
-        <div class="badge" role="status">
-          <span class="spinner"></span>
-          <span>Loading frame<span class="slow"> · downloading from IRSA, about 12 s</span></span>
+        @if (ring(); as r) {
+          <span class="ring" [style.left.%]="r.left" [style.top.%]="r.top" [style.width.%]="r.d"></span>
+        }
+        <span class="dir n" aria-hidden="true">N</span>
+        <span class="dir e" aria-hidden="true">E</span>
+        <!-- The shown picture stays untouched while the next one loads; only this small mark appears, and only if it takes a while. -->
+        @if (s.loading()) {
+          <div class="busy" role="status">
+            <app-logo [size]="26" [spin]="true" />
+            <span class="slow">Fetching from IRSA…</span>
+          </div>
+        }
+      } @else if (!s.imageError()) {
+        <div class="first" role="status">
+          <app-logo [size]="64" [spin]="true" />
+          <span>Loading the first image…</span>
         </div>
       }
       @if (s.imageError(); as err) {
-        <div class="badge error" role="alert">{{ err }}</div>
+        <div class="badge" role="alert">{{ err }}</div>
       }
     </figure>
   }
   @default {
-    <div class="panel" role="status" aria-live="polite">
-      <div class="row"><span class="spinner"></span>
-        @if (s.phase() === 'resolving') {
-          <span>Looking up “{{ s.query() }}”…</span>
-        } @else {
-          @switch (s.coverage()?.state) {
-            @case ('locating') { <span>Working out each image's wavelength…</span> }
-            @case ('error') { <span>The data source has a problem, retrying…</span> }
-            @default { <span>Searching for SPHEREx images…</span> }
-          }
+    <div class="panel glass center" role="status" aria-live="polite">
+      <app-logo [size]="72" [spin]="true" />
+      @if (s.phase() === 'resolving') {
+        <h2>Looking up “{{ s.query() }}”</h2>
+      } @else {
+        @switch (s.coverage()?.state) {
+          @case ('locating') { <h2>Working out each image's wavelength</h2> }
+          @case ('error') { <h2>The data source has a problem, retrying</h2> }
+          @default { <h2>Searching for SPHEREx images</h2> }
         }
-      </div>
+      }
       @if (s.coverage(); as c) {
         @if (c.message) {
           <p class="warn">{{ c.message }}</p>
         }
         @if (progress() !== null) {
-          <div class="bar"><span [style.width.%]="progress()"></span></div>
-          <p class="muted small">{{ c.progress.located }} / {{ c.progress.total }} images · the first visit of a position takes 1–2 minutes</p>
+          <div class="bar" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100">
+            <span [style.width.%]="progress()"></span>
+          </div>
+          <p class="muted small"><span class="num">{{ c.progress.located }} / {{ c.progress.total }}</span> images · the first visit of a position takes 1–2 minutes</p>
         }
       }
     </div>

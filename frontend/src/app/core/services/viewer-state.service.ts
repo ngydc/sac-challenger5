@@ -1,7 +1,8 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Location } from '@angular/common';
 import { ApiError, ApiService, isAbort } from './api.service';
-import { Coverage, Frame, ImageOptions, Picture, ResolveResponse, Target } from '../models/api.models';
+import { Coverage, Frame, FrameCache, ImageOptions, Picture, ResolveResponse, Target } from '../models/api.models';
+import { HistoryService } from './history.service';
 import { bandsOf, framesOfVisit, pickFrame } from '../utils/frames';
 
 export type Stretch = 'fixed' | 'frame';
@@ -11,6 +12,9 @@ export type Playing = 'time' | 'wavelength' | null;
 const DEBOUNCE_MS = 150;
 const BLINK_MS = 800;
 const SWEEP_MS = 350;
+/** How often the frames' cache state is refreshed: while downloads run, and otherwise. */
+const SYNC_BUSY_MS = 2000;
+const SYNC_IDLE_MS = 8000;
 
 /**
  * Shared view state (search result, coverage, slider positions, settings, current picture).
@@ -20,6 +24,7 @@ const SWEEP_MS = 350;
 export class ViewerState {
   private readonly api = inject(ApiService);
   private readonly location = inject(Location);
+  private readonly history = inject(HistoryService);
 
   // ---- search and coverage -------------------------------------------------------------------
   readonly query = signal('');
@@ -63,6 +68,10 @@ export class ViewerState {
   readonly loading = signal(false);
   readonly imageError = signal<string | null>(null);
 
+  // ---- which frames are loaded (the green dots) ----------------------------------------------
+  /** Cache state per frame id as the backend last reported it; newer than `frame.cache`. */
+  private readonly liveCache = signal<ReadonlyMap<string, FrameCache>>(new Map());
+
   private searchCtrl?: AbortController;
   private showCtrl?: AbortController;
   private prefetchCtrl?: AbortController;
@@ -85,6 +94,34 @@ export class ViewerState {
           return;
         }
         this.debounce = setTimeout(() => this.show(t, pick.frame, opts.mask, opts.stretch), DEBOUNCE_MS);
+      });
+    });
+
+    // Keep the cache states current while a target is shown, so the plot's dots turn green live.
+    effect((onCleanup) => {
+      const t = this.target();
+      if (this.phase() !== 'ready' || !t) return;
+      const ctrl = new AbortController();
+      let timer: ReturnType<typeof setTimeout>;
+      const tick = async () => {
+        let busy = this.api.pending().size > 0;
+        try {
+          if (!document.hidden) {
+            const c = await this.api.coverage(t, ctrl.signal);
+            busy ||= c.frames.some((f) => f.cache === 'fetching' || f.cache === 'queued');
+            const old = this.liveCache();
+            if (c.frames.length !== old.size || c.frames.some((f) => old.get(f.id) !== f.cache))
+              this.liveCache.set(new Map(c.frames.map((f) => [f.id, f.cache])));
+          }
+        } catch {
+          // A failed refresh is not shown; the next one tries again.
+        }
+        if (!ctrl.signal.aborted) timer = setTimeout(tick, busy ? SYNC_BUSY_MS : SYNC_IDLE_MS);
+      };
+      timer = setTimeout(tick, SYNC_BUSY_MS);
+      onCleanup(() => {
+        ctrl.abort();
+        clearTimeout(timer);
       });
     });
 
@@ -123,6 +160,7 @@ export class ViewerState {
     try {
       const r = await this.api.resolve(q, ctrl.signal);
       this.resolved.set(r);
+      this.history.add({ query: r.query, name: r.target.name, ra: r.target.ra, dec: r.target.dec });
       this.fov.set(fov ?? r.target.fov);
       await this.loadCoverage(ctrl);
     } catch (e) {
@@ -130,6 +168,38 @@ export class ViewerState {
       this.phase.set('failed');
       this.error.set(messageOf(e));
     }
+  }
+
+  /** Back to the start page: forgets the target and clears the page URL. */
+  reset(): void {
+    this.stop();
+    this.searchCtrl?.abort();
+    this.showCtrl?.abort();
+    this.prefetchCtrl?.abort();
+    clearTimeout(this.debounce);
+    this.prefetchKey = '';
+    this.initial = {};
+    this.phase.set('idle');
+    this.query.set('');
+    this.resolved.set(null);
+    this.coverage.set(null);
+    this.picture.set(null);
+    this.loading.set(false);
+    this.error.set(null);
+    this.imageError.set(null);
+    this.liveCache.set(new Map());
+    this.api.clearPictures();
+    this.location.replaceState(window.location.pathname, '');
+  }
+
+  /**
+   * Whether frame `f` is loaded, right now: what this page loaded or is loading itself is known
+   * at once, everything else comes from the regular refresh.
+   */
+  cacheOf(f: Frame): FrameCache {
+    if (this.api.loaded().has(f.id)) return 'ready';
+    if (this.api.pending().has(f.id)) return 'fetching';
+    return this.liveCache().get(f.id) ?? f.cache;
   }
 
   /** New field of view: the frames are different, so the coverage is loaded again. */
@@ -153,6 +223,8 @@ export class ViewerState {
     this.coverage.set(null);
     this.picture.set(null);
     this.imageError.set(null);
+    this.loading.set(false);
+    this.liveCache.set(new Map());
     this.api.clearPictures();
     const c = await this.api.loadCoverage(t, (c) => this.coverage.set(c), ctrl.signal);
     if (!c.frames.length || !c.wavelength_range_um) {

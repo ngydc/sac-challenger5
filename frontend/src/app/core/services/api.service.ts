@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { API_BASE_URL } from '../api.config';
 import { Coverage, Frame, ImageOptions, Picture, ResolveResponse, Target } from '../models/api.models';
 
@@ -55,6 +55,13 @@ export function targetQuery(t: Target, extra: Record<string, string | number | b
 export class ApiService {
   /** Loaded pictures by URL. PNGs are tiny (47 px), so the whole session is kept in memory. */
   private readonly pictures = new Map<string, Picture>();
+  /** Running image requests per frame id (one frame can be requested with several stretches at once). */
+  private readonly inflight = new Map<string, number>();
+
+  /** Ids of the frames that were loaded in this session: the backend has their data now. */
+  readonly loaded = signal<ReadonlySet<string>>(new Set());
+  /** Ids of the frames that are being loaded right now. */
+  readonly pending = signal<ReadonlySet<string>>(new Set());
 
   resolve(q: string, signal?: AbortSignal): Promise<ResolveResponse> {
     return fetch(`${API_BASE_URL}/resolve?${new URLSearchParams({ q })}`, { signal }).then((r) =>
@@ -74,6 +81,11 @@ export class ApiService {
     }
   }
 
+  /** One /coverage call, to refresh the cache state of the frames of a target that is already shown. */
+  coverage(t: Target, signal?: AbortSignal): Promise<Coverage> {
+    return fetch(`${API_BASE_URL}/coverage?${targetQuery(t)}`, { signal }).then((r) => json<Coverage>(r));
+  }
+
   imageUrl(t: Target, f: Frame, o: ImageOptions = {}): string {
     const fixed = o.vmin !== undefined && o.vmax !== undefined ? { vmin: o.vmin, vmax: o.vmax } : {};
     const qs = targetQuery(t, { mask: o.mask ?? true, ...fixed });
@@ -89,6 +101,15 @@ export class ApiService {
     const url = this.imageUrl(t, f, o);
     const hit = this.pictures.get(url);
     if (hit) return hit;
+    this.track(f.id, 1);
+    try {
+      return await this.fetchFrame(url, f, signal);
+    } finally {
+      this.track(f.id, -1);
+    }
+  }
+
+  private async fetchFrame(url: string, f: Frame, signal?: AbortSignal): Promise<Picture> {
     for (;;) {
       const r = await fetch(`${url}&wait=20`, { signal });
       if (r.status === 202) {
@@ -109,13 +130,22 @@ export class ApiService {
         stretch: [Number(h.get('X-Stretch-Min')), Number(h.get('X-Stretch-Max'))],
       };
       this.pictures.set(url, pic);
+      if (!this.loaded().has(f.id)) this.loaded.update((s) => new Set(s).add(f.id));
       return pic;
     }
+  }
+
+  private track(id: string, d: 1 | -1): void {
+    const n = (this.inflight.get(id) ?? 0) + d;
+    if (n > 0) this.inflight.set(id, n);
+    else this.inflight.delete(id);
+    if (this.pending().has(id) !== n > 0) this.pending.set(new Set(this.inflight.keys()));
   }
 
   /** Frees all pictures (call when the target changes). */
   clearPictures(): void {
     for (const p of this.pictures.values()) URL.revokeObjectURL(p.url);
     this.pictures.clear();
+    this.loaded.set(new Set());
   }
 }
