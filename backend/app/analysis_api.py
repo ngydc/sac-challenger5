@@ -255,12 +255,7 @@ def get_colour(request: Request, epoch: int = Path(..., ge=0, description="Epoch
     """Every wavelength of the epoch in one picture: short wavelengths blue, long ones red (`result.colour.palette`),
     balanced so typical stars are white, one brightness scale for every epoch. Grey (`mask_colour`) = masked
     (saturated or flagged in some wavelengths), transparent = no data."""
-    _, meta = jobs.latest(spec)
-    colour = (meta or {}).get("colour")
-    if meta is None:
-        raise ApiError(409, "not_ready", "nothing has been computed for this view yet")
-    if colour is None:
-        raise ApiError(404, "no_data", "the colour pictures are made after every detector is done; not yet available")
+    colour = jobs.colour(spec)
     if epoch not in colour["usable_epochs"]:
         raise ApiError(404, "no_data", f"no colour picture for epoch {epoch}; available: {colour['usable_epochs']}")
     return _png(request, spec, f"colour_e{epoch}.png")

@@ -231,6 +231,15 @@ class AnalysisService:
         ready = [b["id"] for b in meta["bundles"]]
         raise ApiError(404, "unknown_bundle", f"bundle '{bundle_id}' is not available (yet); available: {ready}")
 
+    def colour(self, spec: TargetSpec) -> dict:
+        """The metadata of the colour pictures (`meta["colour"]`); they exist once every detector is done."""
+        _, meta = self.latest(spec)
+        if not meta:
+            raise ApiError(409, "not_ready", "nothing is computed for this position yet: GET /api/analysis starts it")
+        if meta.get("colour") is None:
+            raise ApiError(404, "no_data", "the colour pictures are made after every detector is done; not yet available")
+        return meta["colour"]
+
     def picture(self, spec: TargetSpec, name: str) -> Path:
         d, _ = self.latest(spec)
         path = d / name if d else None
