@@ -2,6 +2,7 @@ import { Component, computed, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ViewerState } from '../../core/services/viewer-state.service';
 import { ColourStore } from '../../core/services/colour-store.service';
+import { ringPosition } from '../../core/utils/frames';
 import { EXAMPLES } from '../../core/examples';
 import { Logo } from '../logo/logo';
 
@@ -26,10 +27,7 @@ export class Viewer {
   protected readonly ring = computed(() => {
     const p = this.s.picture();
     if (!p || !this.s.showRing() || !p.size || isNaN(p.target.x)) return null;
-    const left = ((p.target.x + 0.5) / p.size) * 100;
-    const top = ((p.size - 1 - p.target.y + 0.5) / p.size) * 100;
-    if (left < 0 || left > 100 || top < 0 || top > 100) return null;
-    return { left, top, d: Math.max(4, (5 / p.size) * 100) };
+    return ringPosition(p.target.x, p.target.y, p.size, p.size);
   });
 
   /** Colour mode: the ring at the season's predicted position (same grid and convention as the frames: y from the bottom). */
@@ -37,10 +35,7 @@ export class Viewer {
     const xy = this.c.epoch()?.target_xy;
     const g = this.c.grid();
     if (!this.s.showRing() || !xy || !g || xy[0] == null || xy[1] == null) return null;
-    const left = ((xy[0] + 0.5) / g.width) * 100;
-    const top = ((g.height - 1 - xy[1] + 0.5) / g.height) * 100;
-    if (left < 0 || left > 100 || top < 0 || top > 100) return null;
-    return { left, top, d: Math.max(4, (5 / g.width) * 100) };
+    return ringPosition(xy[0], xy[1], g.width, g.height);
   });
 
   protected readonly colourAlt = computed(() => {

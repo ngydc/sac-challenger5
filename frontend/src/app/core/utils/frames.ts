@@ -45,3 +45,24 @@ export function framesOfVisit(frames: readonly Frame[], visit: number): Frame[] 
     .filter((f) => f.visit === visit && f.cache !== 'outside')
     .sort((a, b) => a.wavelength_um - b.wavelength_um);
 }
+
+export interface RingPosition {
+  /** Centre, in % of the picture width. */
+  left: number;
+  /** Centre, in % of the picture height (from the top). */
+  top: number;
+  /** Diameter, in % of the picture width. */
+  d: number;
+}
+
+/**
+ * Where the predicted-position ring goes, in % of the picture. `x` and `yFromBottom` are pixel coordinates as the
+ * backend reports them (0-based, y counting from the bottom/south); the ring is centred on the pixel's centre
+ * (+0.5). Null if the position lies outside the picture.
+ */
+export function ringPosition(x: number, yFromBottom: number, width: number, height: number): RingPosition | null {
+  const left = ((x + 0.5) / width) * 100;
+  const top = ((height - 1 - yFromBottom + 0.5) / height) * 100;
+  if (left < 0 || left > 100 || top < 0 || top > 100) return null;
+  return { left, top, d: Math.max(4, (5 / width) * 100) };
+}
