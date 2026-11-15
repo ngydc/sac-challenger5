@@ -3,7 +3,8 @@ at what wavelength the target was observed.
 
 No pixel data is downloaded. Per image only the header is read (~26 KB, HTTP range request);
 the wavelength comes from the per-detector CWAVE map (Spectral WCS calibration product,
-~33 MB per detector, downloaded once into backend/cache/calib/). See app/spherex.py.
+~33 MB per detector, downloaded once and kept in the backend's Postgres cache, app/db.py). See app/spherex.py.
+Needs the database: `docker compose up -d db` from the repo root.
 
 Outputs (backend/out/coverage/):
   coverage.csv   one row per image (the table view of the chart)
@@ -26,7 +27,7 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import spherex  # noqa: E402
+from app import db, spherex  # noqa: E402
 
 # ICRS J2000 position (deg) and proper motion (mas/yr, pmra includes cos dec), from SIMBAD
 # (docs/PROJECT_OVERVIEW.md section 3).
@@ -76,7 +77,7 @@ def main():
         recs = spherex.search(at(Time.now().mjd), collections)
         for r in recs:
             r.edge_margin_deg = spherex.edge_margin_deg(at(r.t_mid_mjd), r.s_region)
-        exps, failed = spherex.locate_on_detector(recs, at)
+        exps, failed = spherex.locate_on_detector(recs, at, calib_cache=db.store)
         results[key] = exps
         print(f"\n=== {name}: {len(recs)} images, {len(exps)} located, {len(failed)} failed ({time.time() - t0:.0f}s)")
         for r, err in failed[:3]:

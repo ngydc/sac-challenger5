@@ -1,13 +1,13 @@
 # Planet X and SPHEREx — Resources
 
-Details on every resource listed on the challenge page, plus the SPHEREx data format and what we measured when testing the IRSA services. Part of the [project overview](PROJECT_OVERVIEW.md).
+The team's own measurements and notes on the resources listed on the challenge page. Part of the [project overview](PROJECT_OVERVIEW.md).
 
-Sources: IRSA's [SPHEREx Archive documentation](https://caltech-ipac.github.io/spherex-archive-documentation/spherex-data-products) and tutorials, read on 2026-11-14. Items marked **(tested)** are things we ran ourselves that day. Items marked **(inferred)** are our own reading and need checking.
+**Official facts are not repeated here.** Release status, file format, flags, access methods, DOIs and the acknowledgement text are in the local copies of the official documentation in [`docs/spherex/`](spherex/) (index: [INDEX.md](INDEX.md)); section 1 says which file covers what. This file keeps only what we measured or concluded ourselves, on 2026-11-14. Items marked **(tested)** are things we ran ourselves that day. Items marked **(inferred)** are our own reading and need checking.
 
 ## Contents
 
-1. [IRSA: where the SPHEREx data lives](#1-irsa-where-the-spherex-data-lives)
-2. [Data format](#2-data-format)
+1. [Where the official facts are](#1-where-the-official-facts-are)
+2. [Data format: our measurements](#2-data-format)
 3. [How to get the data](#3-how-to-get-the-data)
 4. [What we measured (and what it means for the design)](#4-what-we-measured-and-what-it-means-for-the-design)
 5. [Tutorial notebooks](#5-tutorial-notebooks)
@@ -18,110 +18,27 @@ Sources: IRSA's [SPHEREx Archive documentation](https://caltech-ipac.github.io/s
 
 ---
 
-## 1. IRSA: where the SPHEREx data lives
+## 1. Where the official facts are
 
-The NASA/IPAC Infrared Science Archive (IRSA) is our **only required data source**.
+The NASA/IPAC Infrared Science Archive (IRSA) is our **only required data source**. Its documentation, saved locally:
 
-### Mission and release timeline
-
-- SPHEREx launched in **March 2025**. Its planned mission is **two years** of spectroscopy from 0.75 to 5.0 µm over the whole sky, with deeper coverage in the "Deep Fields".
-- IRSA releases new spectral images **weekly** ("Quick Releases"), with higher-level products to follow.
-
-| Release | When | Status now |
-|---|---|---|
-| QR1 | from July 2025 | retired Feb 2026, gone |
-| QR2 | from Oct 2025 (better calibration, reprocessed QR1) | **no longer searchable.** Direct download only until **Feb 2027**. Do not build on it |
-| QR3 | from Sept 2026 (better PSF and photometry calibration) | **current**, weekly updates |
-| **DR1** | **Nov 2026** (reprocesses the QR2 data) | **current** |
-
-**DR1 and QR3 together form one uniformly processed set** of spectral images. To search "everything", query both. Older web pages and tutorials mention `spherex_qr` and `spherex_qr2`. Ignore those.
-
-### Access layers
-
-| Layer | What it is | Best for |
-|---|---|---|
-| **SIA2 API** | IVOA Simple Image Access v2: find images by position, band, time. `https://irsa.ipac.caltech.edu/SIA?` | Finding which images cover a patch |
-| **Cutout service** | Append `?center=RA,Dec&size=DEG` to an image URL to get a small piece | Fetching the frames for the blink video |
-| **TAP API** | SQL-like (ADQL) queries on metadata tables: `https://irsa.ipac.caltech.edu/TAP` | Finding images immediately after weekly ingestion |
-| **Browsable directories** | Plain web directories: `https://irsa.ipac.caltech.edu/ibe/data/spherex/` | Bulk downloads with wget or curl, calibration files |
-| **AWS S3 mirror** | Bucket `nasa-irsa-spherex` (region `us-east-1`, anonymous access) | Cloud processing |
-| **SPHEREx Data Explorer** | IRSA's own web GUI | Manual exploration and comparison |
-| **Python** | `astroquery.ipac.irsa` (recommended) and `pyvo` | Prototyping and the backend |
-
-Notes:
-- New data appears first in the browsable directories, the Data Explorer and certain TAP queries. **SIA2 lags by about a day.**
-- The cutout service only works on the **on-premises** copy, not on S3.
-- Calibration files are **not** available through SIA2, only through the directories.
-- S3 prefixes: `dr1`, `qr3`, `qr2`. Prepend the prefix to the directory layout from the data products page.
+| Topic | Read |
+|---|---|
+| Releases (DR1, QR3, QR2, QR1), which to use, which are searchable | [user-guide-data-releases.md](spherex/user-guide-data-releases.md), [irsa-quick-release-overview.md](spherex/irsa-quick-release-overview.md) |
+| Access layers: SIA2, TAP, browsable directories, Data Explorer, Python | [user-guide-data-access.md](spherex/user-guide-data-access.md) |
+| AWS S3 copy (bucket, region, prefixes) | [irsa-cloud-access.md](spherex/irsa-cloud-access.md) |
+| Cutout parameters (`center`, `size`), clipping, axes | [irsa-cutout-service.md](spherex/irsa-cutout-service.md) |
+| Observation IDs, filenames, the six HDUs, All-Sky Cube, calibration products | [user-guide-data-products.md](spherex/user-guide-data-products.md) |
+| Sky and spectral WCS in Python, wavelength per pixel | [tutorial-intro-spectral-images.md](spherex/tutorial-intro-spectral-images.md) |
+| Flag bits (Table 16), known artifacts | [explanatory-supplement-extracts.md](spherex/explanatory-supplement-extracts.md) |
+| Band edges and other places where sources disagree | [source-discrepancies.md](spherex/source-discrepancies.md) |
+| DOIs and the required acknowledgement text | [irsa-dr1-overview.md](spherex/irsa-dr1-overview.md), [irsa-quick-release-overview.md](spherex/irsa-quick-release-overview.md) |
 
 ---
 
 ## 2. Data format
 
-### Observation structure and naming
-
-- The satellite follows a **survey plan** uploaded in "planning periods" of about **3.5 days**, e.g. `2025W18_2B`.
-- Each pointing is an **observation ID**: `2025W18_2B_0001_1` = planning period + large slew counter (`0001`) + small slew counter (`1`–`4`, at most 4 per large slew).
-- Each pointing gives **6 spectral image files, one per detector** (`D1`–`D6`). Some observations lack some of the six, because quality is checked per band.
-- Filename: `level2_[ObservationID]D[Detector]_spx_l2b-v[Version]-[ProcessingDate].fits`
-  - Example: `level2_2025W18_2B_0001_1D1_spx_l2b-v12-2025-164.fits`
-  - Processing date is `year-dayofyear`. Version is currently around v27.
-- On-premises path: `ibe/data/spherex/<release>/level2/<PlanningPeriod>/l2b-v<ver>-<procdate>/<detector>/<file>`
-
-### The main product: Level 2 Spectral Image (multi-extension FITS)
-
-About **70 MB** per file. Every image is **2040 × 2040 pixels**, about **6.15″ per pixel** (the PSF docs give 6.15″ exactly). The file has a minimal primary HDU (no data, but the `VERSION` keyword) plus six extensions:
-
-| HDU | Name | Content | Notes |
-|---|---|---|---|
-| 1 | `IMAGE` | Calibrated surface brightness, **MJy/sr**, float32 | **No zodiacal light subtracted.** This is what we display |
-| 2 | `FLAGS` | Per-pixel bitmap of status and processing flags, int32 | Definitions in Table 16 of the SPHEREx Explanatory Supplement. Source for "contamination flags" |
-| 3 | `VARIANCE` | Variance of the flux, (MJy/sr)² | For noise-weighted co-adds |
-| 4 | `ZODI` | Modelled zodiacal light background, MJy/sr | Not subtracted from `IMAGE`. Subtract it yourself if you want a cleaner background |
-| 5 | `EPSF` (DR1, QR3) or `PSF` (QR2) | Point spread functions | **Large and not needed for display** (see section 4) |
-| 6 | `WCS-WAVE` | Lookup table mapping pixel to central wavelength and bandwidth | Uses a rarely supported FITS standard. See below |
-
-### Spatial coordinates
-
-- The sky coordinate system (WCS) is in the `IMAGE` header, and `astropy.wcs.WCS(header)` reads it. (IRSA also publishes separate SIP distortion files, which we haven't looked at.)
-- Header keywords are 1-based (FITS), astropy pixel coordinates are 0-based. This trips people up in cutouts: `CRPIX1A`/`CRPIX2A` give the cutout's offset in the original image.
-- Time: the TAP table column `time_bounds_lower` is the observation time, apparently in MJD (e.g. `60801.1066`, which is early May 2025). The SIA2 table has `t_min`/`t_max` **(inferred: MJD)**.
-
-### The wavelength is different for every pixel
-
-This is the unusual part, and it matters for our tool.
-
-- SPHEREx has **linear variable filters (LVFs)**: the wavelength changes smoothly across each detector array.
-- So **one exposure is a spectral image**: a source seen at the left of the detector and the same source seen at the right are measured at different wavelengths. Spectra are built by repointing the telescope so each source lands at many positions over time.
-- For a cutout, **each frame has one effective wavelength at the target's position**. Get it from the `WCS-WAVE` HDU: `WCS(header, fobj=hdulist, key="W")` and `pixel_to_world(x, y)`. The IRSA cutouts tutorial shows exactly this.
-- The `WCS-WAVE` table is meant for visualisation (about 1 nm accuracy). For science use the `CWAVE` and `CBAND` images in the separate Spectral WCS calibration product.
-
-### The six bands (one per detector)
-
-| Detector | Band | Wavelength (µm) | Resolving power R |
-|---|---|---|---|
-| D1 | 1 | 0.75 – 1.09 | 39 |
-| D2 | 2 | 1.10 – 1.62 | 41 |
-| D3 | 3 | 1.63 – 2.41 | 41 |
-| D4 | 4 | 2.42 – 3.82 | 35 |
-| D5 | 5 | 3.83 – 4.41 | 112 |
-| D6 | 6 | 4.42 – 5.00 | 128 |
-
-- Two focal plane assemblies (short-wave D1–D3 and long-wave D4–D6) observe at the same time through a dichroic beam splitter. Each holds three 2K × 2K arrays.
-- The bandpass name used in queries is `SPHEREx-D1` … `SPHEREx-D6`.
-- 102 spectral **channels** = 6 detectors × 17 channels. The `Spectral Channels` calibration product maps each pixel to a channel (0–18).
-
-### Other products (probably not needed for the tool)
-
-| Product | Notes |
-|---|---|
-| **All-Sky Cube** (DR1 only) | Pre-built spectral cubes: 12,288 tiles (HEALPix order 5, about 1.8° × 1.8°), 512 × 512 pixels at 12.9″, 102 channels, **zodi subtracted**. Also served as a **HiPS** tree of PNGs (one per channel, display only, fixed 0–40 MJy/sr stretch). Averaged over time, so **no time information**. Not usable for blinking, but could be a static background or overview layer. Channels 51 and 52 are empty. Helium sky emission at 1.083 µm produces stripes |
-| Calibration files | Gain, dark, dichroic, nonlinearity, read noise, PSFs, solid angle map, SIP, crosstalk and others. Only in the directories, not SIA2 |
-| Spectral WCS (`CWAVE`, `CBAND`) | Per-pixel wavelength and bandwidth, ~32 MB per detector |
-| Solid Angle Pixel Map | Pixel area in arcsec² |
-
-DOIs for citing: QR1 `10.26131/IRSA629`, QR2 `10.26131/IRSA652`, QR3 `10.26131/IRSA662`. The data policy asks for this acknowledgement:
-> "This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration."
+What the official docs describe is in section 1. Below is what we found ourselves in real search results and files.
 
 ### Technical summary (planning tables)
 
@@ -161,7 +78,7 @@ Checked on 2026-11-14 against IRSA: SIA2 searches (collections `spherex_dr1`, `s
 
 **C. The six bands**
 
-SIA2 reports the full wavelength coverage of each array, which is a little wider than the nominal ranges in the earlier band table. Neighbouring arrays overlap slightly.
+SIA2 reports the full wavelength coverage of each array, which is a little wider than the nominal ranges in the official docs (see [source-discrepancies.md](spherex/source-discrepancies.md)). Neighbouring arrays overlap slightly.
 
 | Detector | Type | Wavelength range from SIA2 (µm) | Resolving power R | Typical bandwidth |
 |---|---|---|---|---|
@@ -190,6 +107,8 @@ Some detector counts of one pair differ by a few images (one array of a pair mis
 
 **E. What this means for planning our features**
 
+These were our conclusions before building the backend. Some were changed later: the backend has one wavelength slider across all detectors instead of a detector picker, and frames are single images rather than co-adds. The current design is in [API.md](API.md).
+
 | Planned feature | Finding that affects it |
 |---|---|
 | **Blink player (MVP)** | Total motion across the whole mission so far is only **1–2 pixels** for the three movers, and the PSF is already ~1.2 px wide. A raw blink will be subtle. Plan for good stretch controls, a visit-window-averaged frame, and difference images early, not as extras |
@@ -208,69 +127,14 @@ Some detector counts of one pair differ by a few images (one array of a pair mis
 
 ## 3. How to get the data
 
-### Step 1 (find images): SIA2
+The official how-to (SIA2 collections and example queries, cutout URLs, the one-query TAP alternative, reading files in Python) is in [user-guide-data-access.md](spherex/user-guide-data-access.md), [irsa-cutout-service.md](spherex/irsa-cutout-service.md) and [tutorial-spectral-image-cutouts.md](spherex/tutorial-spectral-image-cutouts.md). The backend implements it in `backend/app/spherex.py`.
 
-Collections (the `COLLECTION` parameter):
+Our own findings on top of that:
 
-| Collection | Content |
-|---|---|
-| `spherex_dr1` | DR1 spectral images, Wide Survey (uniform all-sky coverage) |
-| `spherex_dr1_deep` | DR1, Deep Survey fields |
-| `spherex_dr1_cube` | DR1 All-Sky Cube tiles |
-| `spherex_qr3` | QR3 spectral images, Wide Survey |
-| `spherex_qr3_deep` | QR3, Deep Survey |
-
-To search everything current, query `spherex_dr1` and `spherex_qr3` (and the `_deep` collections if you want the deep fields).
-
-```bash
-curl -o result.xml "https://irsa.ipac.caltech.edu/SIA?COLLECTION=spherex_qr3&POS=circle+127.69444+-39.17760+0.01"
-```
-Add `&RESPONSEFORMAT=HTML` for a readable table. `POS=circle RA Dec RADIUS` is in decimal degrees.
-
-Python:
-```python
-from astroquery.ipac.irsa import Irsa
-results = Irsa.query_sia(pos=(coord, search_radius), collection=['spherex_dr1', 'spherex_qr3'])
-```
-
-Useful columns in the result (standard IVOA names): `access_url` (on-premises download URL), `cloud_access` (S3 info), `obs_id`, `energy_bandpassname`, `em_min`, `em_max`, `t_min`, `t_max`, `calib_level`, `dataproduct_subtype`, `obs_collection`.
-
-### Step 2 (get small pieces): cutouts
-
-Append `center` and `size` (degrees) to an `access_url`:
-
-```bash
-curl -o cutout.fits "https://irsa.ipac.caltech.edu/ibe/data/spherex/qr3/level2/2026W21_2A/l2b-v27-2026-268/1/level2_2026W21_2A_0001_2D1_spx_l2b-v27-2026-268.fits?center=337.8783221,-5.1891588&size=0.1"
-```
-- The cutout is a full multi-extension FITS: the same six HDUs, with `IMAGE`, `FLAGS`, `VARIANCE` and `ZODI` cropped, `WCS-WAVE` adjusted to the cutout, and the PSF HDU left **whole**.
-- `size=0.1` gave a 58 × 59 pixel image in one test and 59 × 59 in another **(tested)**: 0.1° is 360″, and 360″ / 6.15″ ≈ 58.5 pixels. Don't assume an exact size.
-- More options: https://irsa.ipac.caltech.edu/ibe/cutouts.html
-
-### Alternative to steps 1 and 2: one TAP query
-
-The IRSA cutouts tutorial finds the images and builds the cutout URLs in one query, and reads the times too. Tables: `spherex.artifact` (files) and `spherex.plane` (per-image metadata):
-
-```sql
-SELECT 'https://irsa.ipac.caltech.edu/' || a.uri || '?center=RA,Decd&size=0.1' AS uri,
-       p.time_bounds_lower
-FROM spherex.artifact a
-JOIN spherex.plane p ON a.planeid = p.planeid
-WHERE 1 = CONTAINS(POINT('ICRS', RA, DEC), p.poly)
-  AND p.energy_bandpassname = 'SPHEREx-D2'
-ORDER BY p.time_bounds_lower
-```
-(Run through `Irsa.query_tap(query)` or `https://irsa.ipac.caltech.edu/TAP/sync?QUERY=...&LANG=ADQL&FORMAT=csv`.) It sees new data right after weekly ingestion, without the SIA2 delay of about a day.
-
-### Reading the files (Python)
-
-```python
-from astropy.io import fits
-from astropy.utils.data import conf
-conf.remote_timeout = 120          # SPHEREx reads can exceed astropy's default timeout
-with fits.open(url, cache=True) as hdul:
-    image = hdul[1].data           # IMAGE, MJy/sr
-    flags = hdul[2].data
-```
+- **SIA2 is the search step we use.** It is fast (section 4). The backend reads the list of SPHEREx collections from IRSA each hour instead of hard-coding them, and leaves out the All-Sky Cube (no time information) and, for now, the `_deep` collections.
+- **Cutout size is not exact (tested):** `size=0.1` gave a 58 × 59 pixel image in one test and 59 × 59 in another (0.1° is 360″, and 360″ / 6.15″ ≈ 58.5 pixels).
+- **A cutout lying fully outside the image returns HTTP 500** ([irsa-cutout-service.md](spherex/irsa-cutout-service.md)), and **a busy server returns 503** (tested, see [DATA_COVERAGE.md](DATA_COVERAGE.md)). The backend treats the first as permanent and retries the second with backoff.
+- **The wavelength at the target can be found without downloading pixels:** read only the image header with an HTTP range request (~26 KB), then look the pixel up in the Spectral WCS calibration maps (`CWAVE`/`CBAND`). Method and results: [DATA_COVERAGE.md](DATA_COVERAGE.md).
 
 ---
 

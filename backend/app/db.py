@@ -8,6 +8,7 @@ Nothing here knows about SPHEREx: callers pass plain values. Times are Unix seco
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -22,7 +23,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://sac:sac_password@loc
 SCHEMA_SQL = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 
 IMAGE_COLUMNS = ("frame_id", "obs_id", "detector", "collection", "t_mid_mjd", "access_url", "s_region",
-                 "edge_margin_deg", "x", "y", "wavelength_um", "bandwidth_um")
+                 "edge_margin_deg", "x", "y", "wavelength_um", "bandwidth_um", "cloud_url")
 
 
 class Store:
@@ -70,8 +71,8 @@ class Store:
     # -- coverage --------------------------------------------------------------------------
     def save_coverage(self, key: str, target: dict, collections: list[str], failed_locate: int,
                       data_as_of: float, images: list[dict]) -> None:
-        """Replace the stored coverage of `key`. `target` has ra, dec, fov_deg, pmra, pmdec, pm_epoch;
-        each image dict has IMAGE_COLUMNS."""
+        """Replace the stored coverage of `key`. `target` has ra, dec, fov_deg (may be None), pmra, pmdec,
+        pm_epoch; each image dict has IMAGE_COLUMNS."""
         with self._connection() as conn, conn.transaction():
             conn.execute(
                 """INSERT INTO coverage (target_key, ra, dec, fov_deg, pmra, pmdec, pm_epoch, collections,
@@ -136,16 +137,40 @@ class Store:
                    WHERE cutout.status <> 'ready' OR EXCLUDED.status = 'ready'""",
                 (key, url, status, data, message))
 
-    # -- calibration files -----------------------------------------------------------------
+    # -- file layouts (app/cutout.FileLayout, compressed) -----------------------------------
+    def file_layout(self, url: str) -> bytes | None:
+        with self._connection() as conn:
+            row = conn.execute("SELECT layout FROM file_layout WHERE file_url = %s", (url,)).fetchone()
+        return bytes(row["layout"]) if row else None
+
+    def put_file_layout(self, url: str, data: bytes) -> None:
+        """Store or replace (a layout is only re-read when the stored one no longer fits the file)."""
+        with self._connection() as conn:
+            conn.execute("""INSERT INTO file_layout (file_url, layout) VALUES (%s, %s)
+                            ON CONFLICT (file_url) DO UPDATE SET layout = EXCLUDED.layout, created_at = now()""",
+                         (url, data))
+
+    # -- calibration files (stored once per distinct content) --------------------------------
     def calibration(self, s3_key: str) -> bytes | None:
         with self._connection() as conn:
-            row = conn.execute("SELECT data FROM calibration_file WHERE s3_key = %s", (s3_key,)).fetchone()
+            row = conn.execute("""SELECT b.data FROM calibration_key k JOIN calibration_blob b USING (sha256)
+                                  WHERE k.s3_key = %s""", (s3_key,)).fetchone()
         return bytes(row["data"]) if row else None
 
-    def put_calibration(self, s3_key: str, data: bytes) -> None:
+    def calibration_digest(self, s3_key: str) -> str | None:
+        """Hex SHA-256 of the stored file, without loading it (lets callers reuse a copy they already hold)."""
         with self._connection() as conn:
-            conn.execute("""INSERT INTO calibration_file (s3_key, data) VALUES (%s, %s)
-                            ON CONFLICT (s3_key) DO NOTHING""", (s3_key, data))
+            row = conn.execute("SELECT sha256 FROM calibration_key WHERE s3_key = %s", (s3_key,)).fetchone()
+        return row["sha256"] if row else None
+
+    def put_calibration(self, s3_key: str, data: bytes) -> None:
+        """Store a file under its S3 key; the first file stored for a key wins, equal contents are kept once."""
+        digest = hashlib.sha256(data).hexdigest()
+        with self._connection() as conn, conn.transaction():
+            conn.execute("INSERT INTO calibration_blob (sha256, data) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                         (digest, data))
+            conn.execute("INSERT INTO calibration_key (s3_key, sha256) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                         (s3_key, digest))
 
 
 store = Store()

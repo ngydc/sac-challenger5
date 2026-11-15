@@ -5,7 +5,7 @@ What it does, step by step:
   2. Search all of them (SIA2) for images containing Barnard's Star.
   3. Filter: one detector, target safely inside the image.
   4. Group the images into observing seasons (~6 months apart).
-  5. Download cutouts (cached in backend/cache/), compute the wavelength at the star.
+  5. Download cutouts (cached in the backend's Postgres database, app/db.py), compute the wavelength at the star.
   6. Resample every cutout to the same north-up grid and median-stack each season.
   7. Measure where the star is in each season and compare with where its known proper motion
      says it should be. If the pipeline is right, the two agree to a fraction of a pixel.
@@ -13,6 +13,7 @@ What it does, step by step:
 Outputs go to backend/out/barnard/: a blink GIF of the season stacks, a contact sheet of single
 frames, and summary.json.
 
+Needs the cache database: `docker compose up -d db` from the repo root.
 Run from the backend/ folder:
     python -m scripts.fetch_barnard                # defaults: detector D2, 0.05 deg field
     python -m scripts.fetch_barnard --detector D6 --size 0.08 --max-per-season 10
@@ -31,7 +32,7 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import spherex  # noqa: E402
+from app import db, spherex  # noqa: E402
 
 # Barnard's Star, from SIMBAD (see docs/PROJECT_OVERVIEW.md section 3). ICRS, epoch J2000.
 RA_J2000, DEC_J2000 = 269.4520769586187, 4.693364966576667
@@ -113,7 +114,7 @@ def main() -> None:
 
     # 5. Fetch ---------------------------------------------------------------------------------
     t1 = time.time()
-    frames, failures = spherex.fetch_frames(chosen, center, args.size, position_at)
+    frames, failures = spherex.fetch_frames(chosen, center, args.size, position_at, cache=db.store)
     print(f"[5] fetched {len(frames)}/{len(chosen)} cutouts in {time.time() - t1:.0f}s; {len(failures)} failed")
     for r, err in failures:
         print(f"      FAILED {r.obs_id} {r.detector}: {err[:120]}")
