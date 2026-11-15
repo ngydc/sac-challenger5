@@ -33,7 +33,7 @@ export class SearchBar {
 
   protected readonly suggestions = computed<Suggestion[]>(() => [
     ...this.history.recent().map((e, i) => ({ query: e.query, recent: true, first: i === 0 })),
-    ...EXAMPLES.map((query, i) => ({ query, recent: false, first: i === 0 })),
+    ...EXAMPLES.map((e, i) => ({ query: e.name, recent: false, first: i === 0 })),
   ]);
 
   constructor() {

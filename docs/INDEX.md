@@ -103,6 +103,7 @@ These existed before the files above were added. They contain the team's own mea
 - **`docs/PROJECT_OVERVIEW.md`**: the challenge, goals, test targets, risks, MVP checklist.
 - **`docs/RESOURCES.md`**: team notes on the SPHEREx data format and IRSA access, with the team's test timings.
 - **`docs/API.md`**: the backend API for the frontend (MVP: `resolve`, `coverage`, `image.png`): how the time and wavelength sliders map onto the data, every endpoint with real example responses, TypeScript client code, the recommended call pattern, error codes and what to expect from the data. The live reference is the backend's `/docs`.
+- **`docs/API_EPOCHS.md`**: the epoch-maps API (`/api/epochs`, `/api/compute`, `/api/frame`, `/api/rgb`, `/api/diff`, `/api/spectrum`, `/api/config`): call pattern, parameters, response fields, precompute.
 - **`docs/DATA_COVERAGE.md`**: measured coverage of the five test targets (2026-11-14): every image's date, detector and wavelength at the target. Answers "do we get every wavelength every 6 months?" and documents the header + `CWAVE` method and the Barnard's Star pipeline test.
 
 ## Not fetched, or only partly fetched

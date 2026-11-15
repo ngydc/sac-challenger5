@@ -10,8 +10,8 @@
         wavelength, to reveal what moves and what changes.
       </p>
       <div class="examples" role="group" aria-label="Example targets">
-        @for (e of examples; track e) {
-          <button type="button" class="btn" (click)="s.search(e)">{{ e }}</button>
+        @for (e of examples; track e.name) {
+          <button type="button" class="btn" (click)="s.search(e.name)">{{ e.name }}</button>
         }
       </div>
       <p class="credit">NASA Space Apps Challenge 2026 · Data: SPHEREx (NASA/JPL-Caltech) via IRSA</p>

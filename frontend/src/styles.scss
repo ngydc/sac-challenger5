@@ -1,4 +1,5 @@
 /* Global styles and design tokens (deep-space theme). Shared controls live here to keep component styles small. */
+@use 'styles/epochs';
 :root {
   --bg: #04050d;
   --fg: #e9ecff;

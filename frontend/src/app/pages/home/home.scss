@@ -97,6 +97,12 @@
   min-width: 88px;
 }
 
+.head-btns {
+  display: flex;
+  flex: none;
+  gap: 0.4rem;
+}
+
 /*
  * ---- the menu buttons at the bottom right ----
  * A row of icons in the free band below the picture; on a wide stage (where the picture leaves
@@ -170,7 +176,8 @@
   overflow-y: auto;
 }
 
-.open .drawer {
+.open #drawer,
+.deep-open #deep {
   width: var(--drawer-w);
 }
 
@@ -239,7 +246,8 @@
     max-height: 72dvh;
   }
 
-  .open .drawer {
+  .open #drawer,
+  .deep-open #deep {
     transform: none;
   }
 }
