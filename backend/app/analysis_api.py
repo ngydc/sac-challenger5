@@ -127,6 +127,36 @@ class Failed(_Open):
     reason: str
 
 
+class PaletteChannel(Channel):
+    colour: str = Field(description="The colour this channel adds to the colour pictures, as #rrggbb.")
+
+
+class ColourEpoch(_Open):
+    index: int
+    usable: bool = Field(description="False if the epoch covers too few wavelengths: no colour picture.")
+    start: str | None = None
+    end: str | None = None
+    time: str | None = None
+    channels_covered: list[bool] = Field(description="One entry per `palette` channel: whether this epoch has it.")
+    n_channels: int
+    masked_fraction: float | None = Field(None, description="Share of the covered pixels that are masked (grey).")
+    covered_fraction: float | None = None
+    target_xy: list[float | None] | None = Field(
+        None, description="Predicted target position at the epoch's median time, `[x, y]` in picture pixels: x from the left, "
+                          "y from the bottom, like the viewer's `X-Target-X`/`X-Target-Y`. May lie outside the picture. "
+                          "Absent for an epoch without a time.")
+
+
+class Colour(_Open):
+    palette: list[PaletteChannel] = Field(description="Every channel, shortest wavelength first, with its colour.")
+    mask_colour: str = Field(description="Colour of masked pixels (saturated or flagged), as #rrggbb.")
+    usable_epochs: list[int]
+    epochs: list[ColourEpoch]
+    white_balance: list[float | None] | None = None
+    stretch: Stretch | None = Field(None, description="The one brightness scale of every epoch's picture (`unit` is not set).")
+    note: str
+
+
 class AnalysisResult(_Open):
     complete: bool = Field(description="False while a first computation is still adding bundles.")
     grid: Grid
@@ -139,6 +169,8 @@ class AnalysisResult(_Open):
     failed_retryable: int
     channel_table: list[Channel]
     bad_flags: list[str] = Field(description="Pixel flags masked in the epoch maps.")
+    colour: Colour | None = Field(None, description="The colour pictures (`/colour/{epoch}.png`): every wavelength of one "
+                                                    "epoch in one picture. Null until every detector is done.")
 
 
 class Progress(BaseModel):
@@ -219,6 +251,18 @@ def _png(request: Request, spec: TargetSpec, name: str) -> Response:
 
 PNG = {200: {"content": {"image/png": {}}}, 404: {"model": ErrorOut, "description": "`unknown_bundle`, `no_data`"},
        409: {"model": ErrorOut, "description": "`not_ready`: nothing computed yet"}}
+
+
+@router.get("/colour/{epoch}.png", response_class=Response, responses=PNG, summary="Colour picture of one epoch (PNG)")
+def get_colour(request: Request, epoch: int = Path(..., ge=0, description="Epoch index (0 = oldest)."),
+               spec: TargetSpec = Depends(target_spec)) -> Response:
+    """Every wavelength of the epoch in one picture: short wavelengths blue, long ones red (`result.colour.palette`),
+    balanced so typical stars are white, one brightness scale for every epoch. Grey (`mask_colour`) = masked
+    (saturated or flagged in some wavelengths), transparent = no data."""
+    colour = jobs.colour(spec)
+    if epoch not in colour["usable_epochs"]:
+        raise ApiError(404, "no_data", f"no colour picture for epoch {epoch}; available: {colour['usable_epochs']}")
+    return _png(request, spec, f"colour_e{epoch}.png")
 
 
 @router.get("/{bundle}/diff.png", response_class=Response, responses=PNG, summary="Difference last minus first epoch (PNG)")

@@ -2,7 +2,7 @@
 
 > Team note, not an official SPHEREx source. Code: `backend/app/analysis.py` (computation), `backend/app/analysis_jobs.py` (jobs, inputs, storage), `backend/app/analysis_api.py` (endpoints). Live reference: the backend's `/docs`, group "4. Deep analysis". Replaces `docs/API_EPOCHS.md` (the first version of this feature, until 2026-11-15).
 
-For one view, the backend builds per detector one averaged picture per observing **epoch**, an **epoch RGB** (three epochs as red, green, blue: unchanged sources are white, moving or varying ones are coloured) a **difference image** (last minus first epoch, "Total") and **step differences** (each epoch minus the one before it), plus a **spectrum** for every pixel.
+For one view, the backend builds per detector one averaged picture per observing **epoch**, an **epoch RGB** (three epochs as red, green, blue: unchanged sources are white, moving or varying ones are coloured) a **difference image** (last minus first epoch, "Total") and **step differences** (each epoch minus the one before it), plus a **spectrum** for every pixel. From all detectors together it builds one **colour picture** per epoch: every wavelength in one picture, short wavelengths blue, long ones red (the viewer's "Colour" mode).
 
 An **epoch** is the same as a **visit** of the viewer (`/api/coverage`): images grouped by gaps of more than 30 days.
 
@@ -25,6 +25,7 @@ So analysing a view the user has already looked at needs few or no downloads, an
 1. `GET /api/analysis?<target>&start=false` when the user opens the panel: shows a result at once if there is one (the five test targets are computed at backend start-up), starts nothing.
 2. To compute: `GET /api/analysis?<target>` (`start=true` is the default). Then poll every few seconds with `start=false` while `state` is `queued` or `running`, or `refreshing` is true. Bundles appear in `result.bundles` one detector at a time.
 3. Per bundle: `GET /api/analysis/{bundle}/diff.png`, `/steps/{k}.png`, `/rgb.png`, `/epochs/{n}.png`; a click on a pixel: `GET /api/analysis/spectrum`.
+4. Colour pictures: `GET /api/analysis/colour/{n}.png` once `result.colour` is present (it comes after every detector is done).
 
 A new position takes about 2 minutes (about 350 images, measured on a home connection), less if its frames were already loaded. At most 2 analyses run at the same time (`SPHEREX_ANALYSIS_JOBS`); others wait as `queued`.
 
@@ -44,7 +45,7 @@ A new position takes about 2 minutes (about 350 images, measured on a home conne
 | `kept`, `temp_ttl_hours` | `true` for the five test targets (kept for good); other results are removed after `temp_ttl_hours` without use |
 | `result` | `null`, or the metadata below (also while running, with the bundles finished so far) |
 
-`result`: `complete`, `images_key` (changes when new images were used: add it as `v=` to picture URLs to reload them), `grid` (`width`, `height`, `pixel_scale_arcsec`, `orientation`), `epochs[]` (`index`, `start`, `end`, `time` = median time, `n_images`, `images_per_detector`), `bundles[]`, `collections`, `searched_at`, `n_images`, `failed[]` (`frame_id`, `reason`), `failed_retryable`, `channel_table[]` (every spectral channel: `detector`, `channel`, `wavelength_um`, `wl_min_um`, `wl_max_um`), `bad_flags` (masked pixel flags).
+`result`: `colour` (see the colour picture below; `null` until every detector is done), `complete`, `images_key` (changes when new images were used: add it as `v=` to picture URLs to reload them), `grid` (`width`, `height`, `pixel_scale_arcsec`, `orientation`), `epochs[]` (`index`, `start`, `end`, `time` = median time, `n_images`, `images_per_detector`), `bundles[]`, `collections`, `searched_at`, `n_images`, `failed[]` (`frame_id`, `reason`), `failed_retryable`, `channel_table[]` (every spectral channel: `detector`, `channel`, `wavelength_um`, `wl_min_um`, `wl_max_um`), `bad_flags` (masked pixel flags).
 
 `bundles[]`: `id`, `kind` (`detector` / `all`), `detectors`, `mode` (`three_epochs`, `two_epochs`, `one_epoch`, `no_data`), `note` (one sentence on the mode), `usable_epochs`, `rgb` (`red`/`green`/`blue` → `{epoch, time, start, end}`; `null` for `no_data`), `diff` (`first`, `last`, `clip_sigma`, `relative_floor`, `definition`, `colours`; `null` with fewer than two usable epochs), `diff_steps[]` (see below; empty with fewer than two usable epochs), `wavelength_um` (`min`, `max`), `channels[]`, `channels_excluded[]`, `epochs[]` (per epoch for this bundle: `usable`, `n_images`, `start`, `end`, `time`, `span_days`, `wavelength_at_target_um`, `saturated_images`, `files`, `background`, `noise`, …), `n`, `stretch` (`kind`, `black`, `white`, `noise`, `unit`: one stretch for every epoch of the bundle), `covered_fraction`, `gaps[]` (coverage gaps as sentences).
 
@@ -76,6 +77,18 @@ The epoch RGB (`bundle.rgb` says which epoch is which colour). Grey in `one_epoc
 The averaged picture of epoch `n` (greyscale with transparency). 404 `no_data` if the epoch is not usable for this bundle.
 
 Pictures carry an `ETag` and `Cache-Control: no-cache`: the browser revalidates and gets `304` while the picture is unchanged.
+
+### `GET /api/analysis/colour/{n}.png?<target>`
+Every wavelength of epoch `n` in one picture (`analysis.colour_composite`):
+- **Colours.** Each spectral channel gets a colour by its position in log(wavelength): blue (shortest, about 0.75 µm), cyan, green, yellow, red (longest, about 5 µm). `result.colour.palette` lists every channel with its colour, for a legend.
+- **Balance.** Red, green and blue are scaled so that the brightest pixels (the field stars) are white on average (`white_balance`). A coloured source therefore has an unusual spectrum: red = brighter at long wavelengths than a typical star (cool or dusty, e.g. RW Aurigae's disk).
+- **One stretch for every epoch** (`stretch`), so brightness changes stay visible when blinking. Faint pixels fade to grey, so sky noise is not coloured.
+- **Masked pixels are grey** (`mask_colour`). A pixel is masked when red, green or blue lost more than 65 % of the channels this epoch should have there, mostly to the pixel flags (`bad_flags`, e.g. `OVERFLOW` = saturated). Typical case: a bright star's saturated core, which would otherwise turn red because only the long wavelengths are left. Smaller losses are filled by the neighbouring channels. Single-channel spikes the flags missed are dropped first (as for the epoch maps).
+- **Transparent** = no data.
+- Only epochs with at least half of all channels get a picture (`usable_epochs`). Per epoch, `epochs[]` gives `channels_covered` (one boolean per palette entry, to grey out missing wavelengths in the legend), `n_channels`, `masked_fraction`, and `target_xy` (the predicted target position at the epoch's median time, x from the left, y from the **bottom**, like the viewer's `X-Target-X/Y`).
+- An epoch's wavelengths are observed over 1–3 weeks (`docs/DATA_COVERAGE.md`), so the picture is not a snapshot: a fast-moving object can show up as dots of different colours.
+
+Errors: `not_ready` (409), `no_data` (404: not yet computed, or the epoch has too few channels).
 
 ### `GET /api/analysis/spectrum?<target>&x&y`
 `x` from the left (east), `y` from the **bottom** (south), as the viewer's `X-Target-Y`. Returns `unit`, `epochs[]` and `channels[]`, each channel with `detector`, `channel`, `wavelength_um`, `wl_min_um`, `wl_max_um` and `epochs[]` of `{epoch, value, sigma, n}` (`value` is `null` where nothing was measured).

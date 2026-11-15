@@ -1,5 +1,5 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
-import { EpochsApi } from './epochs-api.service';
+import { AnalysisStatusService, busy } from './analysis-status.service';
 import { ApiService } from './api.service';
 import { ViewerState } from './viewer-state.service';
 import { AnalysisStatus, Bundle, Position } from '../models/epochs.models';
@@ -8,12 +8,8 @@ import { StepChoice, stepsOf } from '../utils/diff-steps';
 
 export type Group = 'detector' | 'all';
 
-const POLL_MS = 4000;
-/** Measured 2026-11-15 (docs/FETCH_SPEED.md): about 3 images per second. Used until a rate has been measured. */
-const FALLBACK_IMAGES_PER_S = 3;
 const EXPLAINER_KEY = 'spherex-blink.deep-explainer-open';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const same = (a: Position | null, b: Position | null) =>
   !!a &&
   !!b &&
@@ -23,8 +19,6 @@ const same = (a: Position | null, b: Position | null) =>
   a.pmra === b.pmra &&
   a.pmdec === b.pmdec &&
   a.pm_epoch === b.pm_epoch;
-const busy = (s: AnalysisStatus | null) =>
-  !!s && (s.state === 'queued' || s.state === 'running' || s.refreshing);
 
 function readFlag(key: string, fallback: boolean): boolean {
   try {
@@ -41,18 +35,23 @@ function readFlag(key: string, fallback: boolean): boolean {
  *
  * Rule: opening the panel asks for the state only (GET /api/analysis?start=false). Computed results (e.g. the
  * examples) and running computations are shown at once. Only `showImages()`, the user's "Start deep analysis"
- * click, starts a computation (GET /api/analysis), because it may download a few hundred images.
+ * click, starts a computation (GET /api/analysis), because it may download a few hundred images. The state itself
+ * and its polling belong to AnalysisStatusService, so a computation started by the colour view shows up here too.
  */
 @Injectable({ providedIn: 'root' })
 export class EpochsStore {
-  private readonly api = inject(EpochsApi);
+  private readonly analysis = inject(AnalysisStatusService);
   private readonly mainApi = inject(ApiService);
   private readonly viewer = inject(ViewerState);
 
   /** The panel is open: the stage shows the difference pictures instead of the slider picture. */
   readonly open = signal(false);
   readonly position = signal<Position | null>(null);
-  readonly status = signal<AnalysisStatus | null>(null);
+  /** State of the analysis of `position`, shared with the colour view (one poll per target). */
+  readonly status = computed<AnalysisStatus | null>(() => {
+    const p = this.position();
+    return p ? this.analysis.status(p)() : null;
+  });
   readonly checking = signal(false);
   readonly starting = signal(false);
   readonly error = signal<string | null>(null);
@@ -73,8 +72,6 @@ export class EpochsStore {
   readonly examplePositions = signal<Record<string, { ra: number; dec: number }>>({});
 
   private generation = 0;
-  private samples: { t: number; done: number }[] = [];
-  private readonly rate = signal<number | null>(null);
   private started = false;
 
   readonly result = computed(() => this.status()?.result ?? null);
@@ -113,9 +110,8 @@ export class EpochsStore {
 
   /** Remaining time of a running computation, in seconds (null while the archive is being searched). */
   readonly remainingS = computed(() => {
-    const pr = this.status()?.progress;
-    if (!pr || pr.total <= 0) return null;
-    return (pr.total - pr.done) / (this.rate() ?? FALLBACK_IMAGES_PER_S);
+    const p = this.position();
+    return p ? this.analysis.remainingS(p)() : null;
   });
 
   constructor() {
@@ -127,6 +123,12 @@ export class EpochsStore {
       const open = this.open();
       if (!open || !t) return;
       untracked(() => void this.setPosition(t));
+    });
+    // A computation that is running (maybe started by the colour view) is shown at once.
+    effect(() => {
+      const s = this.status();
+      if (!busy(s)) return;
+      untracked(() => this.showing.set(true));
     });
     // Back to Total when the chosen step cannot be reached any more (other grouping, new result, buttons hidden).
     // A step missing in a single tile keeps the choice: that tile says so instead.
@@ -174,20 +176,17 @@ export class EpochsStore {
     if (same(p, this.position()) && this.status()) return;
     const gen = ++this.generation;
     this.showing.set(false);
-    this.status.set(null);
     this.diffStep.set(null); // a new position starts with Total
     this.closeDetail();
     this.error.set(null);
     this.position.set(p);
     this.checking.set(true);
     try {
-      const s = await this.api.status(p);
+      const s = await this.analysis.check(p);
       if (gen !== this.generation) return;
-      this.status.set(s);
       // Already computed (e.g. the examples) or being computed: show it at once, nothing new is computed.
       // Only an uncomputed position waits for the user to start the (slow) analysis.
       if (s.state === 'ready' || busy(s)) this.showing.set(true);
-      if (busy(s)) void this.poll(gen);
     } catch (e) {
       if (gen === this.generation) this.error.set(friendly(e));
     } finally {
@@ -208,46 +207,14 @@ export class EpochsStore {
     this.starting.set(true);
     const gen = ++this.generation;
     try {
-      const started = await this.api.start(p);
+      await this.analysis.start(p);
       if (gen !== this.generation) return;
-      this.status.set(started);
       this.showing.set(true);
-      if (busy(started)) void this.poll(gen);
     } catch (e) {
       this.error.set(friendly(e));
     } finally {
       this.starting.set(false);
     }
-  }
-
-  /** Polls the status while the backend computes; bundles appear one detector at a time. */
-  private async poll(gen: number): Promise<void> {
-    this.samples = [];
-    this.rate.set(null);
-    while (gen === this.generation && busy(this.status())) {
-      await sleep(POLL_MS);
-      if (gen !== this.generation) return;
-      const p = this.position();
-      if (!p) return;
-      try {
-        const s = await this.api.status(p);
-        if (gen !== this.generation) return;
-        this.status.set(s);
-        this.measureRate(s);
-      } catch {
-        /* a missed poll is retried */
-      }
-    }
-  }
-
-  private measureRate(s: AnalysisStatus): void {
-    const pr = s.progress;
-    if (!pr || pr.total <= 0) return;
-    this.samples.push({ t: Date.now() / 1000, done: pr.done });
-    const first = this.samples[0];
-    const last = this.samples[this.samples.length - 1];
-    const dt = last.t - first.t;
-    if (dt >= 60 && last.done > first.done) this.rate.set((last.done - first.done) / dt);
   }
 
   openDetail(id: string): void {

@@ -53,7 +53,22 @@ DIFF_RELATIVE_FLOOR = 0.15  # the difference's uncertainty includes this fractio
 STRETCH_HI_PERCENTILE = 99.7
 SKY_FRACTION = 0.1  # the darkest 10 % of the field count as sky (see `dark_sky`)
 REPROJ_VERSION = 1  # bump when `reproject_cutout` changes: cached reprojections are then redone
-PIPELINE_VERSION = 9  # 9: step differences. Bump when anything after the reprojection changes: products are then redone
+PIPELINE_VERSION = 11  # 11: colour composites (10 was a development state without them). Bump when anything after the reprojection changes: products are then redone
+
+# Colour composite (see `colour_composite`): every wavelength of one epoch in one picture.
+# The ramp gives each channel a colour by its position in log(wavelength) between the shortest and the longest
+# channel: blue (short) -> cyan -> green -> yellow -> red (long). Anchors are (position 0..1, (r, g, b)).
+COLOUR_RAMP = ((0.0, (0.05, 0.2, 1.0)), (0.3, (0.0, 0.75, 0.95)), (0.5, (0.3, 1.0, 0.3)), (0.7, (1.0, 0.8, 0.0)),
+               (1.0, (1.0, 0.08, 0.0)))
+COLOUR_MIN_CHANNEL_FRACTION = 0.5  # an epoch gets a colour picture if it covers this share of all channels
+COLOUR_HOLE_SIZE = 15  # px: holes up to about this size inside a channel's footprint count as masked pixels
+COLOUR_MIN_WEIGHT = 0.35  # a pixel is masked if a colour (r, g or b) has less than this share of its expected data.
+#                          Measured on the test targets (2026-11-15): moderately bright stars lose 10-30 % of their
+#                          channels to flags (SUR_ERROR, TRANSIENT, ...) without a visible colour error; 0.7 masked
+#                          about 10 % of the field, 0.35 keeps those stars and still masks saturated cores.
+COLOUR_BALANCE_PERCENTILE = 98.0  # white balance on the pixels brighter than this percentile (the stars)
+COLOUR_CHROMA_SIGMA = (2.0, 8.0)  # colour fades in between these brightnesses (in noise sigma): sky noise stays grey
+COLOUR_MASK_RGB = (88, 90, 100)  # masked pixels (saturated or flagged in a channel this epoch should have)
 
 # Flags that make a pixel unusable here, by NAME (bit numbers come from each file's FLAGS header).
 # Chosen from Table 16 of the Explanatory Supplement: everything described as unusable, erroneous, saturated
@@ -85,10 +100,12 @@ def epochmap_params() -> dict:
             "outlier": [OUTLIER_MIN_N, OUTLIER_SIGMA, OUTLIER_REL], "sky_fraction": SKY_FRACTION,
             "spike": [SPIKE_MIN_CHANNELS, SPIKE_SIGMA, SPIKE_REL],
             "channel_min_field_fraction": CHANNEL_MIN_FIELD_FRACTION, "epoch_min_channel_fraction": EPOCH_MIN_CHANNEL_FRACTION,
-            "diff": [DIFF_CLIP_SIGMA, DIFF_RELATIVE_FLOOR], "stretch_hi_percentile": STRETCH_HI_PERCENTILE}
+            "diff": [DIFF_CLIP_SIGMA, DIFF_RELATIVE_FLOOR], "stretch_hi_percentile": STRETCH_HI_PERCENTILE,
+            "colour": [COLOUR_RAMP, COLOUR_MIN_CHANNEL_FRACTION, COLOUR_HOLE_SIZE, COLOUR_MIN_WEIGHT,
+                       COLOUR_BALANCE_PERCENTILE, COLOUR_CHROMA_SIGMA, COLOUR_MASK_RGB]}
 
 
-def _num(x, digits: int = 6):
+def json_number(x, digits: int = 6):
     """A float for JSON: None instead of NaN/inf."""
     x = float(x)
     return round(x, digits) if np.isfinite(x) else None
@@ -144,8 +161,8 @@ def channel_table(rows: list[dict], detector: str, nchan: int) -> list[dict]:
     """One entry per channel of a detector: detector, channel (1-based), wavelength_um, wl_min_um, wl_max_um."""
     by = {(int(r["DETECTOR"]), int(r["SUBCHAN"])): r for r in rows}
     n = int(detector.lstrip("D"))
-    return [{"detector": detector, "channel": c, "wavelength_um": _num(by[(n, c)]["WAVELENGTH"], 4),
-             "wl_min_um": _num(by[(n, c)]["WL_MIN"], 4), "wl_max_um": _num(by[(n, c)]["WL_MAX"], 4)}
+    return [{"detector": detector, "channel": c, "wavelength_um": json_number(by[(n, c)]["WAVELENGTH"], 4),
+             "wl_min_um": json_number(by[(n, c)]["WL_MIN"], 4), "wl_max_um": json_number(by[(n, c)]["WL_MAX"], 4)}
             for c in range(1, nchan + 1)]
 
 
@@ -214,10 +231,10 @@ def reproject_cutout(hdul: fits.HDUList, record: spherex.ImageRecord, spec: Targ
     bg, _ = clipped_stats(out_img[valid])
     meta = {
         "frame_id": frame_id(record), "file": record.access_url.rsplit("/", 1)[-1], "detector": record.detector,
-        "collection": record.collection, "mjd": record.t_mid_mjd, "wavelength_um": _num(wl), "bandwidth_um": _num(bw),
+        "collection": record.collection, "mjd": record.t_mid_mjd, "wavelength_um": json_number(wl), "bandwidth_um": json_number(bw),
         "flags_near_target": near, "saturated": SATURATION_FLAG in near, "version": str(hdul[0].header.get("VERSION", "")),
-        "bunit": str(hdr.get("BUNIT", "")), "background": _num(bg), "valid_fraction": _num(valid.mean(), 4),
-        "median_variance": _num(np.median(out_var[valid])) if valid.any() else None,
+        "bunit": str(hdr.get("BUNIT", "")), "background": json_number(bg), "valid_fraction": json_number(valid.mean(), 4),
+        "median_variance": json_number(np.median(out_var[valid])) if valid.any() else None,
         "flagged_pixels": flagged, "cutout_pixels": int(flags.size),
     }
     return {"img": out_img.astype(np.float32), "var": out_var.astype(np.float32), "chan": chan, "meta": meta}
@@ -316,6 +333,27 @@ def diff_rgba(z: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
+def spike_mask(I_e: np.ndarray, V_e: np.ndarray, have_e: np.ndarray, detectors) -> np.ndarray:
+    """Single-channel spikes of ONE epoch: True where a channel is further from the median of its detector's channels
+    at that pixel than SPIKE_SIGMA times its noise plus SPIKE_REL times that median allow.
+
+    I_e, V_e, have_e: (C, H, W) image, variance and "this channel has data here" of one epoch; detectors: the detector
+    name of each of the C channels. Only channels in `have_e` are compared, and only at pixels where a detector has at
+    least SPIKE_MIN_CHANNELS of them. Most channels have one exposure, so a cosmic-ray hit or bad pixel that the flags
+    missed cannot be rejected when averaging; a real source is seen in all channels of a detector, a hit in one."""
+    detectors = np.asarray(detectors)
+    spike = np.zeros(have_e.shape, bool)
+    for det in np.unique(detectors):
+        g = detectors == det
+        h = have_e[g]
+        enough = h.sum(0) >= SPIKE_MIN_CHANNELS
+        Ig = np.where(h, I_e[g], np.nan)
+        med = np.nanmedian(Ig, axis=0)
+        with np.errstate(invalid="ignore"):
+            spike[g] = h & enough & (np.abs(Ig - med) > SPIKE_SIGMA * np.sqrt(V_e[g]) + SPIKE_REL * np.abs(med))
+    return spike
+
+
 STEP_ARRAY_PREFIX = "diff_s"  # make_bundle's arrays "diff_s0", "diff_s1", ...: the step differences
 
 
@@ -370,10 +408,10 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
             "epoch_start": epochs[e]["start"] if e < len(epochs) else None,  # of the whole epoch (all detectors)
             "epoch_end": epochs[e]["end"] if e < len(epochs) else None,
             "start": iso_time(t[0]) if t else None, "end": iso_time(t[-1]) if t else None,
-            "time": iso_time(float(np.median(t))) if t else None, "span_days": _num(t[-1] - t[0], 2) if t else None,
+            "time": iso_time(float(np.median(t))) if t else None, "span_days": json_number(t[-1] - t[0], 2) if t else None,
             "channels_covered": [chan_label(c) for c in range(C) if covered[e, c]],
             "channels_missing": [chan_label(c) for c in range(C) if not covered[e, c]],
-            "wavelength_at_target_um": {"min": _num(min(wl), 4), "max": _num(max(wl), 4)} if wl else None,
+            "wavelength_at_target_um": {"min": json_number(min(wl), 4), "max": json_number(max(wl), 4)} if wl else None,
             "saturated_images": sum(1 for x in exps if x["saturated"]),
             "files": sorted(x["file"] for x in exps),
         })
@@ -391,15 +429,10 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     common = np.all(have[usable], axis=0)  # (C, H, W)
     # single-channel spikes: compare each channel with the median of its detector's channels at that pixel and
     # epoch; a channel that fails in ANY usable epoch is dropped at that pixel in EVERY epoch
+    dets = [c["detector"] for c in chan_info]
     spike = np.zeros_like(common)
-    for det in sorted({c["detector"] for c in chan_info}):
-        g = np.array([c["detector"] == det for c in chan_info])
-        enough = common[g].sum(0) >= SPIKE_MIN_CHANNELS
-        for e in usable:
-            Ig = np.where(common[g], I[e][g], np.nan)
-            med = np.nanmedian(Ig, axis=0)
-            tol = SPIKE_SIGMA * np.sqrt(V[e][g]) + SPIKE_REL * np.abs(med)
-            spike[g] |= common[g] & enough & (np.abs(Ig - med) > tol)
+    for e in usable:
+        spike |= spike_mask(I[e], V[e], common, dets)
     common &= ~spike
     meta["spikes_rejected"] = int(spike.sum())
     K = common.sum(0)  # channels per pixel
@@ -420,7 +453,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
         bg, sig = clipped_stats(B[e][sky])
         if np.isfinite(bg):
             B[e] -= bg
-        ep_meta[e]["background"], ep_meta[e]["noise"] = _num(bg), _num(sig)
+        ep_meta[e]["background"], ep_meta[e]["noise"] = json_number(bg), json_number(sig)
         sigmas.append(sig)
     sigma = float(np.nanmax(sigmas)) if np.any(np.isfinite(sigmas)) else float("nan")
 
@@ -455,7 +488,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
                                           f"The uncertainty includes {100 * DIFF_RELATIVE_FLOOR:.0f} % of the pixel's brightness "
                                           "(unchanged stars differ that much between epochs)",
                             "relative_floor": DIFF_RELATIVE_FLOOR,
-                            "empirical_scale": _num(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
+                            "empirical_scale": json_number(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
                             "colours": "blue = brighter in the last epoch, red = fainter (brighter in the first), white = unchanged"}
 
     # steps: each pair of NEIGHBOURING usable epochs (an unusable epoch in between is skipped), same colour scale.
@@ -464,7 +497,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     for k, (a, b) in enumerate(zip(usable, usable[1:])):
         z, scale = pair_difference(B, BV, sky, a, b)
         step = {"step": k, "first": ref(a), "last": ref(b), "available": z is not None,
-                "empirical_scale": _num(scale, 4) if z is not None else None}
+                "empirical_scale": json_number(scale, 4) if z is not None else None}
         if z is not None:
             arrays[f"{STEP_ARRAY_PREFIX}{k}"] = z  # for tests and scripts; not stored (see analysis_jobs._store_bundle)
             pngs[f"diff_{bundle_id}_s{k}.png"] = _png(diff_rgba(z, valid & np.isfinite(z)))
@@ -473,18 +506,186 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     used = [c for c in range(C) if common[c].any()]
     meta["channels"] = [chan_info[c] for c in used]
     meta["channels_excluded"] = [chan_label(c) for c in range(C) if c not in used]
-    meta["wavelength_um"] = ({"min": _num(min(chan_info[c]["wl_min_um"] for c in used), 4),
-                              "max": _num(max(chan_info[c]["wl_max_um"] for c in used), 4)} if used else None)
-    meta["stretch"] = {"kind": "asinh", "black": 0.0, "white": _num(hi), "noise": _num(sigma),
+    meta["wavelength_um"] = ({"min": json_number(min(chan_info[c]["wl_min_um"] for c in used), 4),
+                              "max": json_number(max(chan_info[c]["wl_max_um"] for c in used), 4)} if used else None)
+    meta["stretch"] = {"kind": "asinh", "black": 0.0, "white": json_number(hi), "noise": json_number(sigma),
                        "unit": next((x["bunit"] for x in exposures if x.get("bunit")), None)}
-    meta["n"] = {"per_epoch": {str(e): {"min": int(BN[e][valid].min()), "median": _num(np.median(BN[e][valid]), 1),
+    meta["n"] = {"per_epoch": {str(e): {"min": int(BN[e][valid].min()), "median": json_number(np.median(BN[e][valid]), 1),
                                         "max": int(BN[e][valid].max())} for e in usable if valid.any()},
-                 "channels_per_pixel": {"min": int(K[valid].min()), "median": _num(np.median(K[valid]), 1),
+                 "channels_per_pixel": {"min": int(K[valid].min()), "median": json_number(np.median(K[valid]), 1),
                                         "max": int(K[valid].max())} if valid.any() else None}
-    meta["covered_fraction"] = _num(valid.mean(), 4)
+    meta["covered_fraction"] = json_number(valid.mean(), 4)
     meta["gaps"] = _gaps(meta, float(valid.mean()))
     arrays.update({"image": B, "variance": BV, "n": BN, "channels_per_pixel": K.astype(np.uint8), "sky": sky})
     return meta, arrays, pngs
+
+
+def ramp_colour(t: float) -> tuple[float, float, float]:
+    """The colour of position t (0 = shortest wavelength, 1 = longest) on COLOUR_RAMP, linearly interpolated."""
+    t = float(np.clip(t, 0.0, 1.0))
+    for (t0, c0), (t1, c1) in zip(COLOUR_RAMP, COLOUR_RAMP[1:]):
+        if t <= t1:
+            f = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return tuple(float(a + f * (b - a)) for a, b in zip(c0, c1))
+    return COLOUR_RAMP[-1][1]
+
+
+def _hex(rgb) -> str:
+    return "#" + "".join(f"{int(round(255 * float(np.clip(v, 0, 1)))):02x}" for v in rgb)
+
+
+def _filled(have: np.ndarray, size: int) -> np.ndarray:
+    """`have` with its small holes closed (dilation, then erosion). The straight edges of a channel's footprint
+    stay where they are; holes smaller than about `size` px (a saturated star core, a flagged pixel) are filled.
+    Padded with the edge values first, so the picture's border is not eaten."""
+    from scipy.ndimage import binary_closing
+
+    r = size // 2 + 1
+    p = np.pad(have, r, mode="edge")
+    return binary_closing(p, structure=np.ones((size, size), bool))[r:-r, r:-r] | have
+
+
+def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: list[dict], epochs: list[dict]
+                     ) -> tuple[dict, dict[str, bytes]]:
+    """Every wavelength of one epoch in one colour picture, for every epoch that covers enough channels.
+
+    I, V, N: (E, C, H, W) per epoch and channel of ALL detectors (step 7a), sky-subtracted per exposure.
+    chan_info: one dict per channel (detector, channel, wavelengths). epochs: the request's epochs.
+
+    1. Each channel gets a colour from COLOUR_RAMP by log(wavelength): short = blue, long = red. Each of r, g, b
+       is a weighted mean of the channels, the weights normalised so that a spectrum flat in MJy/sr is grey.
+    2. Only channels the epoch covers (CHANNEL_MIN_FIELD_FRACTION of the field) are used. Single-channel spikes
+       (cosmic-ray hits or bad pixels the flags missed, as in make_bundle) are dropped. A pixel inside a
+       channel's footprint without data there was masked by its flags (saturated, hot, cosmic ray, ...; see
+       BAD_FLAG_NAMES). Small gaps are bridged by the other channels; if r, g or b loses more than
+       1 - COLOUR_MIN_WEIGHT of its expected weight, the pixel is masked (COLOUR_MASK_RGB): its colour would
+       be wrong, e.g. a saturated star core would turn red because only the long wavelengths are left.
+    3. White balance: r, g, b are scaled so that the brightest pixels (the stars) are white on average.
+       Unusual colours then mean an unusual spectrum: red = brighter at long wavelengths than a typical star.
+    4. ONE brightness stretch (asinh) for every epoch, on the brightness (r + g + b) / 3; the colour of each
+       pixel is kept. Faint pixels fade to grey, so sky noise does not become coloured speckle.
+    Returns (metadata, PNG files by name "colour_e<epoch>.png")."""
+    E, C, H, W = I.shape
+    wl = np.array([c["wavelength_um"] if c.get("wavelength_um") is not None else
+                   0.5 * (c["wl_min_um"] + c["wl_max_um"]) for c in chan_info], float)
+    lo, hi_wl = float(np.nanmin(wl)), float(np.nanmax(wl))
+    t = (np.log(wl) - np.log(lo)) / max(np.log(hi_wl) - np.log(lo), 1e-9)
+    ramp = np.array([ramp_colour(x) for x in t])  # (C, 3): the colour shown for each channel
+    weights = ramp / ramp.sum(0)  # each of r, g, b: weights summing to 1 over all channels
+
+    have = (N > 0) & np.isfinite(I)
+    covered = have.reshape(E, C, -1).mean(-1) >= CHANNEL_MIN_FIELD_FRACTION  # (E, C)
+    # single-channel spikes: further from the median of the detector's channels at that pixel than its noise and
+    # SPIKE_REL times that median allow (the same test as make_bundle's); dropped like a flagged pixel
+    dets = [c["detector"] for c in chan_info]
+    spikes = 0
+    for e in range(E):
+        spike = spike_mask(I[e], V[e], have[e], dets)
+        spikes += int(spike.sum())
+        have[e] &= ~spike
+    usable = [e for e in range(E) if covered[e].sum() > 0 and covered[e].sum() >= COLOUR_MIN_CHANNEL_FRACTION * C]
+
+    comp = np.full((E, 3, H, W), np.nan, np.float32)
+    masked = np.zeros((E, H, W), bool)
+    nodata = np.ones((E, H, W), bool)
+    for e in usable:
+        cs = np.flatnonzero(covered[e])
+        h = have[e, cs]
+        fp = np.stack([_filled(h[i], COLOUR_HOLE_SIZE) for i in range(len(cs))])
+        w = weights[cs]  # (k, 3)
+        expected = np.einsum("kc,khw->chw", w, fp.astype(np.float64))
+        got = np.einsum("kc,khw->chw", w, h.astype(np.float64))
+        num = np.einsum("kc,khw->chw", w, np.where(h, I[e, cs], 0.0).astype(np.float64))
+        nodata[e] = (expected <= 1e-6).any(0)
+        frac = np.where(expected > 1e-6, got / np.maximum(expected, 1e-12), 0.0)
+        bad = ~nodata[e] & (frac < COLOUR_MIN_WEIGHT).any(0)
+        if bad.any():
+            from scipy.ndimage import binary_dilation
+
+            bad = binary_dilation(bad, iterations=1) & ~nodata[e]  # the rim of a hole is part-saturated too
+        masked[e] = bad
+        with np.errstate(invalid="ignore", divide="ignore"):
+            comp[e] = np.where(got > 0, num / got, np.nan).astype(np.float32)
+        comp[e][:, nodata[e] | bad] = np.nan
+
+    meta: dict = {"spikes_rejected": spikes, "palette": [{"detector": c["detector"], "channel": c["channel"], "wavelength_um": json_number(wl[i], 4),
+                               "wl_min_um": c.get("wl_min_um"), "wl_max_um": c.get("wl_max_um"), "colour": _hex(ramp[i])}
+                              for i, c in enumerate(chan_info)],
+                  "mask_colour": _hex(np.array(COLOUR_MASK_RGB) / 255), "usable_epochs": usable, "epochs": []}
+    pngs: dict[str, bytes] = {}
+
+    def epoch_meta(e: int) -> dict:
+        ep = epochs[e] if e < len(epochs) else {}
+        valid = ~nodata[e]
+        return {"index": e, "usable": e in usable, "start": ep.get("start"), "end": ep.get("end"), "time": ep.get("time"),
+                "channels_covered": [bool(x) for x in covered[e]], "n_channels": int(covered[e].sum()),
+                "masked_fraction": json_number(masked[e][valid].mean(), 4) if e in usable and valid.any() else None,
+                "covered_fraction": json_number(valid.mean(), 4) if e in usable else None}
+
+    if not usable:
+        meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": None, "stretch": None,
+                      "note": "No epoch covers enough wavelengths for a colour picture."})
+        return meta, pngs
+
+    # sky level per epoch and colour, on one common set of source-free pixels (as in make_bundle, step 8)
+    lum = np.nanmean(comp[usable], axis=(0, 1))
+    sky = dark_sky(lum)
+    for e in usable:
+        for k in range(3):
+            bg, _ = clipped_stats(comp[e, k][sky])
+            if np.isfinite(bg):
+                comp[e, k] -= bg
+
+    # white balance on the brightest pixels of every epoch together: the same factors for every epoch
+    L = comp[usable].mean(1)  # (U, H, W)
+    vals = L[np.isfinite(L)]
+    gains = np.ones(3)
+    if vals.size >= 50:
+        cut = np.percentile(vals, COLOUR_BALANCE_PERCENTILE)
+        bright = np.isfinite(L) & (L > cut) & (L > 0)
+        if bright.sum() >= 10:
+            ratios = [np.median(comp[usable][:, k][bright] / L[bright]) for k in range(3)]
+            if all(np.isfinite(r) and r > 0 for r in ratios):
+                gains = 1.0 / np.array(ratios)
+    comp *= gains[None, :, None, None].astype(np.float32)
+
+    # one stretch for every epoch, on the brightness
+    L = comp[usable].mean(1)
+    sigmas = [clipped_stats(L[i][sky])[1] for i in range(len(usable))]
+    sigma = float(np.nanmax(sigmas)) if np.any(np.isfinite(sigmas)) else float("nan")
+    vals = L[np.isfinite(L)]
+    white = float(np.percentile(vals, STRETCH_HI_PERCENTILE)) if vals.size else float("nan")
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = float(np.nanstd(vals)) if vals.size else 1.0
+    if not np.isfinite(white) or white < 10 * sigma:
+        white = 10 * sigma
+
+    lo_c, hi_c = COLOUR_CHROMA_SIGMA
+    for e in usable:
+        c3 = np.nan_to_num(comp[e], nan=0.0)
+        lum_e = c3.mean(0)
+        s = asinh_stretch(lum_e, sigma, white)  # 0..1 brightness on screen
+        with np.errstate(invalid="ignore", divide="ignore"):
+            scale = np.where(lum_e > 0, s / lum_e, 0.0)
+        rgb = np.clip(c3 * scale, 0, None)
+        chroma = np.clip((lum_e / sigma - lo_c) / (hi_c - lo_c), 0, 1)
+        rgb = s + chroma * (rgb - s)  # faint pixels: grey of the same brightness
+        top = rgb.max(0)
+        rgb = np.where(top > 1, rgb / np.maximum(top, 1e-12), rgb)  # too bright: keep the hue, not clip to white
+        out = np.zeros((H, W, 4), np.uint8)
+        valid = ~nodata[e]
+        for k in range(3):
+            out[..., k] = np.where(valid, np.rint(255 * np.clip(rgb[k], 0, 1)), 0)
+        out[..., 3] = np.where(valid, 255, 0)  # no data: transparent
+        out[masked[e]] = (*COLOUR_MASK_RGB, 255)
+        pngs[f"colour_e{e}.png"] = _png(out)
+
+    meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": [json_number(g, 4) for g in gains],
+                 "stretch": {"kind": "asinh", "black": 0.0, "white": json_number(white), "noise": json_number(sigma)},
+                 "note": "Every wavelength of one season in one picture: short wavelengths blue, long ones red, "
+                         "balanced so that typical stars are white. One brightness scale for every season. "
+                         "Grey pixels are masked (saturated or flagged in some wavelengths); transparent = no data."})
+    return meta, pngs
 
 
 def _gaps(meta: dict, covered: float | None) -> list[str]:
@@ -530,7 +731,7 @@ def average_detector(exposures: list[dict], load: Callable[[str], tuple[np.ndarr
     for x in usable_x:
         v = arrs[x["frame_id"]][0][sky]
         v = v[np.isfinite(v)]
-        x["sky_level"] = _num(np.median(v)) if v.size >= max(20, 0.3 * sky.sum()) else None
+        x["sky_level"] = json_number(np.median(v)) if v.size >= max(20, 0.3 * sky.sum()) else None
         if x["sky_level"] is None:
             dropped.append({"frame_id": x["frame_id"], "reason": "too few sky pixels to measure the background"})
     for e in range(n_epochs):

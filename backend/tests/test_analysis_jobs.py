@@ -144,6 +144,14 @@ def test_analysis_uses_the_shared_store_and_serves_the_pictures(setup):
     assert c.get("/api/analysis/all/epochs/2.png", params=Q).status_code == 200
     assert c.get("/api/analysis/D1/epochs/9.png", params=Q).json()["error"]["code"] == "no_data"
     assert c.get("/api/analysis/D5/diff.png", params=Q).json()["error"]["code"] == "unknown_bundle"
+    # colour pictures: one per usable epoch, built from every detector once all are done
+    col = r["colour"]
+    assert col["usable_epochs"] == [0, 1, 2] and len(col["palette"]) == C and len(col["epochs"]) == 3
+    assert all(len(e["target_xy"]) == 2 for e in col["epochs"])
+    pic = c.get("/api/analysis/colour/1.png", params=Q)
+    assert pic.status_code == 200 and pic.headers["content-type"] == "image/png"
+    assert c.get("/api/analysis/colour/7.png", params=Q).json()["error"]["code"] == "no_data"
+    assert c.get("/api/analysis/colour/0.png", params={**Q, "ra": "11.0"}).json()["error"]["code"] == "not_ready"
     assert c.get("/api/analysis/X9/diff.png", params=Q).status_code == 422
     other = {**Q, "ra": "11.0"}
     assert c.get("/api/analysis/D1/diff.png", params=other).json()["error"]["code"] == "not_ready"
@@ -283,7 +291,7 @@ def test_the_api_takes_the_viewers_target_parameters():
     paths = {p for p in app.openapi()["paths"] if p.startswith("/api/analysis")}
     assert paths == {"/api/analysis", "/api/analysis/spectrum", "/api/analysis/{bundle}/diff.png",
                      "/api/analysis/{bundle}/rgb.png", "/api/analysis/{bundle}/epochs/{epoch}.png",
-                     "/api/analysis/{bundle}/steps/{step}.png"}
+                     "/api/analysis/{bundle}/steps/{step}.png", "/api/analysis/colour/{epoch}.png"}
     for gone in ("/api/config", "/api/epochs", "/api/compute", "/api/rgb", "/api/diff", "/api/frame", "/api/spectrum"):
         assert gone not in app.openapi()["paths"]
 
