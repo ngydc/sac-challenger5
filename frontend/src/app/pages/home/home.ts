@@ -16,15 +16,18 @@ import { ColourStore } from '../../core/services/colour-store.service';
 
 type TabId = 'controls' | 'history' | 'about';
 
-/** The menu's tabs, in the order of their buttons (top to bottom). `icon` is an SVG path (24 px grid). */
+/**
+ * The menu's tabs, in the order of their buttons (top to bottom). The Deep Analysis button (its own drawer)
+ * follows Controls. `icon` is an SVG path (24 px grid).
+ */
 const TABS: readonly { id: TabId; label: string; icon: string }[] = [
-  { id: 'about', label: 'About SPHEREx', icon: 'M12 21a9 9 0 1 0 0-18a9 9 0 0 0 0 18zM12 11v6M12 7.5v.5' },
-  { id: 'history', label: 'History', icon: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2' },
   {
     id: 'controls',
     label: 'Controls',
     icon: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 7a2 2 0 1 0 4 0a2 2 0 1 0-4 0M8 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
   },
+  { id: 'history', label: 'History', icon: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2' },
+  { id: 'about', label: 'About SPHEREx', icon: 'M12 21a9 9 0 1 0 0-18a9 9 0 0 0 0 18zM12 11v6M12 7.5v.5' },
 ];
 
 /** Main page: the full-screen viewer, the brand/home button, the search bar, a small HUD and the menu with its tabs. */

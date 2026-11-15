@@ -1,7 +1,7 @@
-import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { ViewerState } from '../../core/services/viewer-state.service';
 import { HistoryService } from '../../core/services/history.service';
-import { EXAMPLES } from '../../core/examples';
+import { EXAMPLES, SEARCH_HINTS, SEARCH_HINT_MS } from '../../core/examples';
 import { Logo } from '../logo/logo';
 
 interface Suggestion {
@@ -14,6 +14,7 @@ interface Suggestion {
 /**
  * F4: one search box for object names and coordinates (sent on submit, not on every key).
  * While it has the focus it offers the last three searches and the five example targets.
+ * While it is empty it shows a concrete example input that changes every few seconds.
  */
 @Component({
   selector: 'app-search-bar',
@@ -31,6 +32,10 @@ export class SearchBar {
   /** Suggestion marked with the arrow keys; -1 = none (Enter then searches the typed text). */
   protected readonly marked = signal(-1);
 
+  protected readonly hints = SEARCH_HINTS;
+  private readonly hintIndex = signal(0);
+  protected readonly hint = computed(() => SEARCH_HINTS[this.hintIndex() % SEARCH_HINTS.length]);
+
   protected readonly suggestions = computed<Suggestion[]>(() => [
     ...this.history.recent().map((e, i) => ({ query: e.query, recent: true, first: i === 0 })),
     ...EXAMPLES.map((e, i) => ({ query: e.name, recent: false, first: i === 0 })),
@@ -39,6 +44,8 @@ export class SearchBar {
   constructor() {
     // Show what was searched (e.g. when it came from the page URL or an example button).
     effect(() => this.text.set(this.s.query()));
+    const timer = setInterval(() => this.hintIndex.update((i) => i + 1), SEARCH_HINT_MS);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
   }
 
   protected submit(e: Event): void {

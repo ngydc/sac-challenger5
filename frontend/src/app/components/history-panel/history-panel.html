@@ -1,5 +1,5 @@
 @if (history.entries().length) {
-  <div class="bar">
+  <div class="list-head">
     <span class="muted">{{ history.entries().length }} {{ history.entries().length === 1 ? 'search' : 'searches' }}, newest first</span>
     <button type="button" class="btn ghost small" (click)="history.clear()">Clear all</button>
   </div>
