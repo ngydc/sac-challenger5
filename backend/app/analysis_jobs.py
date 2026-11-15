@@ -42,6 +42,7 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
+from astropy.time import Time
 
 from . import analysis, presets, resolver, spherex
 from .core import PIXEL_SCALE_ARCSEC, VISIT_GAP_DAYS, ApiError, TargetSpec, frame_id, iso
@@ -396,8 +397,20 @@ class AnalysisService:
 
         if cubes:
             job.stage = "all detectors: averaging"
-            self._store_bundle(out, meta, "all", "all", *(np.concatenate([cubes[k][i] for k in dets], axis=1) for i in range(3)),
-                               [c for k in dets for c in analysis.channel_table(rows, k, nchan)], epochs, all_exposures)
+            all_info = [c for k in dets for c in analysis.channel_table(rows, k, nchan)]
+            I_all, V_all, N_all = (np.concatenate([cubes[k][i] for k in dets], axis=1) for i in range(3))
+            self._store_bundle(out, meta, "all", "all", I_all, V_all, N_all, all_info, epochs, all_exposures)
+            job.stage = "all detectors: colour pictures"
+            cmeta, _, pngs = analysis.colour_composite(I_all, V_all, N_all, all_info, epochs)
+            for ce in cmeta["epochs"]:  # predicted target position at the epoch's median time, as the viewer's X-Target-X/Y
+                if ce.get("time"):
+                    tx, ty = grid.world_to_pixel(spec.at(Time(ce["time"]).mjd))
+                    ce["target_xy"] = [analysis._num(tx, 2), analysis._num(ty, 2)]
+            for name, data in pngs.items():
+                (out / name).write_bytes(data)
+            meta["colour"] = cmeta
+            _write_json(out / "meta.json", meta)
+            del I_all, V_all, N_all
         meta["complete"] = True
         meta["computed_at"] = _iso_unix(time.time())
         _write_json(out / "meta.json", meta)
