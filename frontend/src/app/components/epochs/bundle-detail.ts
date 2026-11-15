@@ -48,7 +48,7 @@ import { SpectrumPanel } from './spectrum-panel';
                   [alt]="title() + ' enlarged'"
                 />
                 <p class="muted small">
-                  North is up, east is left. Click any pixel to see its spectrum.
+                  North is up, east is left. <b>Click any pixel to see its spectrum.</b>
                 </p>
               } @else {
                 <div class="tile-none hatch big">
@@ -72,6 +72,20 @@ import { SpectrumPanel } from './spectrum-panel';
               </p>
             </div>
 
+            <!-- The spectrum sits beside the picture (below it on narrow screens), above the metadata, so a
+                 click on a pixel shows it without scrolling. -->
+            <div class="detail-side">
+              @if (s.pick(); as p) {
+                @if (s.position(); as pos) {
+                  <app-spectrum-panel
+                    [position]="pos"
+                    [x]="p.x"
+                    [y]="p.y"
+                    [height]="grid().height"
+                    (closed)="s.pick.set(null)"
+                  />
+                }
+              }
             <dl class="meta">
               <dt>Time span</dt>
               <dd>{{ span() }}</dd>
@@ -127,19 +141,9 @@ import { SpectrumPanel } from './spectrum-panel';
                 }
               </dd>
             </dl>
+            </div>
           </div>
 
-          @if (s.pick(); as p) {
-            @if (s.position(); as pos) {
-              <app-spectrum-panel
-                [position]="pos"
-                [x]="p.x"
-                [y]="p.y"
-                [height]="grid().height"
-                (closed)="s.pick.set(null)"
-              />
-            }
-          }
         }
       </div>
     </dialog>
