@@ -41,8 +41,8 @@ user types "Barnard's Star"  or  "17h57m48.5s +04d41m36s"
 | # | Endpoint | Purpose | Typical time |
 |---|---|---|---|
 | 1 | `GET /api/resolve?q=` | A name or coordinates become a target. | instant for the 5 test targets and coordinates, about 1 s for other names |
-| 2 | `GET /api/coverage` | What exists here. Poll until `ready`. | instant for a position seen before; 50 to 125 s the first time |
-| 3 | `GET /api/frames/{id}/image.png` | One picture. | about 0.1 s if cached; about 12 s if it must be downloaded first |
+| 2 | `GET /api/coverage` | What exists here. Poll until `ready`. | instant for a position seen before (any `fov`); about 6 s the first time |
+| 3 | `GET /api/frames/{id}/image.png` | One picture. | about 0.1 s if cached; about 1-3 s if it must be downloaded first |
 
 The **target parameters** (`ra, dec, fov, pmra, pmdec, pm_epoch`) must be sent **unchanged on every call** for that target: they are part of what a frame is. Keep them in one object and build the query string from it (helper in section 5).
 
@@ -147,7 +147,7 @@ The first call starts the lookup in the background and returns immediately. **Po
 | `frames[].id` | Use in the image URL. |
 | `frames[].detector` | D1 to D6. Informational; don't make the user pick it. |
 | `frames[].wavelength_um` / `bandwidth_um` | Wavelength at the target in this image, and the width of the band there. |
-| `frames[].cache` | `ready` (instant) · `fetching` / `queued` (being downloaded) · `failed` (a recent download failed) · `outside` (the view lies outside this image, never available) · `missing` (not requested yet). You never need to wait for `ready` before asking for an image; use it to draw which positions on the sliders are instant. |
+| `frames[].cache` | `ready` (instant) · `fetching` / `queued` (being downloaded; once the coverage is ready the backend queues every frame of the view by itself) · `failed` (a recent download failed) · `outside` (the view lies outside this image, never available) · `missing` (not requested yet). You never need to wait for `ready` before asking for an image; use it to draw which positions on the sliders are instant. |
 | `grid` | Size of every picture at `scale=1`. All frames use the same grid, so stars line up between frames. |
 
 **Choosing the frame for a slider position (visit `v`, wavelength `w`)** is done in the frontend with the list you have, no request needed:
@@ -196,7 +196,7 @@ One frame as a PNG, north up, east left. `{id}` is `frames[].id`.
 
 Colours: grey = brightness (asinh scale), **dark red** = masked bad pixel, **slate blue** = no data (outside the image).
 
-**Speed.** Cached frames answer in about 0.1 s (10 ms if shown recently). Others are downloaded from IRSA first, about 12 s, and the backend downloads three at a time (IRSA rate-limits). You may request many frames at once: three frames requested together took 11.8 s in our test, the same as one. **When the wavelength slider settles, request the frames of all visits at that wavelength together (the blink set).** That also fills the cache, so scrubbing afterwards is instant.
+**Speed.** Cached frames answer in about 0.1 s (10 ms if shown recently). Others are downloaded first, about 1-3 s (cut out of the SPHEREx copy on AWS; up to about 12 s if only IRSA's own cutout service works), eight at a time. As soon as the coverage is ready, the backend downloads **every frame of the view in the background** (350 frames took about 75 s in our test), so after a minute or two everything is instant. A frame you request jumps ahead of that queue. **When the wavelength slider settles, request the frames of all visits at that wavelength together (the blink set).**
 
 **Brightness.** Without `vmin`/`vmax` every frame is scaled on its own, which **hides brightness changes between visits**, a problem for variable stars (RW Aurigae, R Draconis are test targets for exactly that). For a blink, draw all frames of the blink set with one range:
 
@@ -357,11 +357,11 @@ Marker ring on a picture shown at `scale`: `cx = (p.target.x + 0.5) * scale`, `c
 - **Not every wavelength in every visit** (see `exact`). Frames of one visit at different wavelengths were taken up to a few weeks apart.
 - **Bright stars are saturated** (Barnard's Star in several bands): the core carries `OVERFLOW`/`BLOOM` and, with `mask=true`, shows as a hole.
 - **Pixels are 6.15″**: Barnard's Star shifts only about 1.7 pixels per year, so a blink shows small motions. Use a small field of view and scale up.
-- **IRSA is the bottleneck.** About 12 s per uncached frame, and its services are sometimes unavailable for minutes (we saw `502` errors). The backend retries and caches everything it gets in its Postgres database (coverage lists, cutouts, calibration files), so the cache survives restarts and container rebuilds.
+- **Downloads.** Frames are cut out of the SPHEREx copy on AWS S3 by reading only the needed bytes (about 1-3 s each), with IRSA as the fallback (its services are sometimes unavailable for minutes; we saw `502` errors). The backend retries and caches everything it gets in its Postgres database (coverage lists, cutouts, calibration files), so the cache survives restarts and container rebuilds. Measurements: `docs/FETCH_SPEED.md`.
 - More data: `docs/DATA_COVERAGE.md`.
 
 ## 8. Not in the MVP (can be added later)
 
-Raw pixel values for client-side drawing, prefetching, a status endpoint, a credits/acknowledgement endpoint (put the acknowledgement text in the page footer for now), co-added and difference images, per-pixel quality flags, Gaia/WISE overlays, spectra, short target keys for embedding, comets and asteroids. Ideas for each are in the earlier design notes; none is needed for "enter a target, scrub through time and wavelength".
+Raw pixel values for client-side drawing, a status endpoint, a credits/acknowledgement endpoint (put the acknowledgement text in the page footer for now), co-added and difference images, per-pixel quality flags, Gaia/WISE overlays, spectra, short target keys for embedding, comets and asteroids. Ideas for each are in the earlier design notes; none is needed for "enter a target, scrub through time and wavelength".
 
-Known limits of the current implementation: the cache (Postgres, schema in `backend/app/schema.sql`) is never pruned, so it only grows (about 120 KB per frame); each (position, `fov`) is cached separately, so two users looking at slightly different coordinates do not share frames.
+Known limits of the current implementation: the cache (Postgres, schema in `backend/app/schema.sql`) is never pruned, so it only grows (about 120 KB per frame). The coverage is shared by every `fov` at one position, but frames are cached per (position, `fov`): after a zoom, or for two users at slightly different coordinates, frames are downloaded again (in the background, about 1-2 minutes per target).

@@ -249,7 +249,13 @@ def get_coverage(spec: TargetSpec = Depends(target_spec)) -> CoverageOut:
     """The first call starts looking up the data in the background and returns at once; **poll every 1.5 s
     until `state` is `ready`** (show `progress`). The call always returns HTTP 200; problems with the
     data source are reported in `state` and `message`, so the polling loop stays simple. Looking up a position
-    that was seen before is instant, also after a backend restart. A first lookup took 50 to 125 s in our tests.
+    that was seen before is instant, also after a backend restart, **and for any `fov`** (the lookup is stored
+    per position; changing the zoom only filters it). A first lookup takes about 5 s (about 15 s right after a
+    backend restart, while the wavelength maps load).
+
+    As soon as the lookup is ready, the backend starts downloading **every frame of this view** in the
+    background (`cache` turns from `queued` to `ready`, roughly 1-3 minutes for 350 frames). Requesting a frame
+    moves it to the front of that queue.
 
     **How the sliders map onto the data**
 
@@ -319,11 +325,13 @@ def get_frame_image(
     request (they are part of what a frame is). Use it as an `<img src>` for ready frames, or `fetch()` it to
     handle 202.
 
-    **Speed.** A frame already in the cache answers in about 0.1 s (10 ms if it was shown recently). Any other is downloaded from IRSA first
-    (about 12 s; IRSA is slow and rate-limits) and this call waits up to `wait` seconds for it, then answers
-    **202** with a `Retry-After` header and the frame keeps downloading in the background: ask again. Several
-    frames can be requested at once; the backend downloads three at a time. When the wavelength slider settles,
-    request the frames of **all visits at that wavelength** together (the blink set): that also fills the cache.
+    **Speed.** A frame already in the cache answers in about 0.1 s (10 ms if it was shown recently). Any other is
+    downloaded first (about 1-3 s from the SPHEREx copy on AWS; up to about 12 s if only IRSA's own cutout
+    service works) and this call waits up to `wait` seconds for it, then answers **202** with a `Retry-After`
+    header and the frame keeps downloading in the background: ask again. Several frames can be requested at
+    once; the backend downloads eight at a time, and a requested frame jumps ahead of the background prefetch.
+    When the wavelength slider settles, request the frames of **all visits at that wavelength** together
+    (the blink set).
 
     **Brightness.** Without `vmin`/`vmax` each frame is scaled on its own, which hides brightness changes
     between visits (important for variable stars). For a blink: request the first frame without them, read
