@@ -10,6 +10,7 @@ Team CHALLENGER5: Can, Duc, Daniel, Maximilian.
 - **Time and wavelength sliders.** SPHEREx observes every spot on the sky about every six months, each time as a set of narrow infrared colours (0.75 to 5 µm). One slider steps through the observing seasons, the other through the wavelengths. A blink player cycles through either.
 - **Adjustable field of view, image options and flags**, and a history of recent searches.
 - **Deep analysis (epoch maps).** Averages the images of each observing epoch and detector, and combines the epochs into one colour picture and a difference image: a star that moved shows a colour fringe, a star that changed brightness a uniform colour. Spectra at any pixel.
+- **Colour view.** Combines every wavelength of one observing season into a single picture: short infrared wavelengths blue, long ones red, typical stars white, saturated pixels masked. Blink through the seasons in colour to spot what moves or looks unusual. A qualitative view; for measurements use the deep analysis.
 - **Shareable links.** The page address holds the search, e.g. `http://localhost:4200/?q=Barnard's Star&fov=0.08`.
 
 The five targets we test with are built in: Barnard's Star, Epsilon Indi B, WISE 0855-0714 (all three move), RW Aurigae and R Draconis (brightness changes). Their positions and what to expect are in [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md), the images available for each in [docs/DATA_COVERAGE.md](docs/DATA_COVERAGE.md).
