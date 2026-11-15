@@ -788,7 +788,8 @@ def run(spec: TargetSpec, refresh: bool = False) -> dict:
             search = _search(spec)
             _write_json(_dir(spec) / "search.json", search)
         fields = spherex.ImageRecord.__dataclass_fields__
-        records = [spherex.ImageRecord(**{k: r[k] for k in fields}) for r in search["records"]]
+        records = [spherex.ImageRecord(**{k: r[k] for k in fields if k in r}) for r in search["records"]]  # older
+        # search.json files lack fields added later (e.g. cloud_url); those take the dataclass default
         seasons = spherex.group_seasons(records, EPOCH_GAP_DAYS)
         epoch_of = {frame_id(r): e for e, s in enumerate(seasons) for r in s}
         epochs = []

@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS coverage_image (
 );
 ALTER TABLE coverage_image ADD COLUMN IF NOT EXISTS cloud_url text NOT NULL DEFAULT '';
 
--- Downloaded cutouts (IMAGE, FLAGS, ZODI, WCS-WAVE; ~120 KB each) and permanent/recent failures.
+-- Downloaded cutouts (IMAGE, FLAGS, VARIANCE, ZODI, WCS-WAVE; ~120-150 KB each) and permanent/recent failures.
 -- cache_key is the SHA-1 of the IRSA cutout URL; the URL contains the file version, so a reprocessed
 -- image gets a new key and a stored cutout never goes stale. Cutouts made from byte ranges
 -- (app/cutout.py) are identical to IRSA's and use the same key.

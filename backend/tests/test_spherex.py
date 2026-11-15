@@ -36,6 +36,7 @@ def synthetic_file() -> tuple[bytes, dict[str, np.ndarray]]:
     image = rng.normal(5, 1, (N, N)).astype(np.float32)
     zodi = np.linspace(1, 2, N * N, dtype=np.float32).reshape(N, N)
     flags = rng.integers(0, 2**22, (N, N)).astype(np.int32)
+    variance = rng.normal(1, 0.1, (N, N)).astype(np.float32)
     hdr = sky_wcs().to_header()
     hdr["CRPIX1W"], hdr["CRPIX2W"] = 1.0, 1.0  # a second WCS whose CRPIX must move with the cutout
     hdus = fits.HDUList([
@@ -43,14 +44,14 @@ def synthetic_file() -> tuple[bytes, dict[str, np.ndarray]]:
         fits.ImageHDU(image, header=hdr, name="IMAGE"),
         fits.CompImageHDU(flags, compression_type="RICE_1", tile_shape=(1, N), name="FLAGS",
                           header=fits.Header([("MSKN0021", "SOURCE")])),
-        fits.ImageHDU(rng.normal(1, 0.1, (N, N)).astype(np.float32), name="VARIANCE"),
+        fits.ImageHDU(variance, name="VARIANCE"),
         fits.ImageHDU(zodi, header=hdr, name="ZODI"),
         fits.BinTableHDU.from_columns([fits.Column("psf", "E", array=np.zeros(20000, np.float32))], name="EPSF"),
         fits.BinTableHDU.from_columns([fits.Column("X", "3J", array=np.zeros((1, 3), np.int32))], name="WCS-WAVE"),
     ])
     buf = io.BytesIO()
     hdus.writeto(buf)
-    return buf.getvalue(), {"IMAGE": image, "ZODI": zodi, "FLAGS": flags}
+    return buf.getvalue(), {"IMAGE": image, "ZODI": zodi, "FLAGS": flags, "VARIANCE": variance}
 
 
 FILE, ARRAYS = synthetic_file()
@@ -100,7 +101,7 @@ def test_range_cutout_matches_the_parent_file(multirange, server_multi):
     x0, y0, nx, ny = st.box
     assert (nx, ny) == (40, 40) and abs(x0 + 19.5 - 120.3) <= 1 and abs(y0 + 19.5 - 170.8) <= 1
     with fits.open(io.BytesIO(data)) as h:
-        assert [x.name for x in h] == ["PRIMARY", "IMAGE", "FLAGS", "ZODI", "WCS-WAVE"]
+        assert [x.name for x in h] == ["PRIMARY", "IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE"]  # as IRSA's, no PSF
         for name, full in ARRAYS.items():
             np.testing.assert_array_equal(h[name].data, full[y0:y0 + ny, x0:x0 + nx])
         assert h["IMAGE"].header["CRPIX1"] == pytest.approx((N + 1) / 2 - x0)
@@ -109,7 +110,7 @@ def test_range_cutout_matches_the_parent_file(multirange, server_multi):
         # the cut WCS still puts the centre at the same sky position
         x, y = WCS(h["IMAGE"].header).world_to_pixel(CENTER)
         assert float(x) == pytest.approx(120.3 - x0, abs=1e-6) and float(y) == pytest.approx(170.8 - y0, abs=1e-6)
-    assert st.bytes < len(FILE) / 3  # never the whole file
+    assert st.bytes < len(FILE) / 2  # never the whole file (small synthetic file: the 64 KB header reads weigh a lot)
 
 
 def test_only_the_needed_columns_are_read_when_the_server_allows_it():
@@ -244,7 +245,7 @@ def test_a_stored_layout_needs_one_round_of_three_requests_and_gives_the_same_cu
     other_center = SkyCoord(*sky_wcs().pixel_to_world_values(200.0, 60.0), unit="deg")  # a pan: other rows
     reused = cutout.range_cutout(url, other_center, 40 * SCALE, server(FILE, False, log=log), stats=again,
                                  layout=first.layout)
-    assert again.layout_reused and len(log) == 3 and again.round_trips == 1 and first.round_trips == 5
+    assert again.layout_reused and len(log) == 4 and again.round_trips == 1 and first.round_trips == 5
     with fits.open(io.BytesIO(reused)) as h:
         x0, y0, nx, ny = again.box
         for name, full in ARRAYS.items():
@@ -286,4 +287,4 @@ def test_download_cutout_stores_the_layout_under_the_irsa_url_and_reuses_it():
     assert layouts.puts == 1 and list(layouts.rows) == [rec.access_url]
     n_first = len(log)
     second = spherex.download_cutout(rec, CENTER, 40 * SCALE, client, layouts=layouts)
-    assert second == first and len(log) - n_first == 3 and layouts.puts == 1  # reused, not stored again
+    assert second == first and len(log) - n_first == 4 and layouts.puts == 1  # reused, not stored again

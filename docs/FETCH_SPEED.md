@@ -44,7 +44,7 @@ All four recommendations are in the backend now (branch `fetch-speed-investigati
 | Target pixel from the footprint polygon; 3 real headers per lookup are checked, and if any is off by more than 25 px every header is read instead. Headers come from S3 first. | `spherex.locate_on_detector`, `footprint_pixel` |
 | Calibration maps kept in memory per process, keyed by content; stored once per distinct file (existing rows migrated automatically: 12 rows → 6 files, database 423 MB → 247 MB). S3 listed once per release. | `spherex.SpectralMaps`, `schema.sql`, `db.py` |
 | Coverage stored per position + motion; each request filters it for its fov. | `service.Coverage.view`, `TargetSpec.coverage_key` |
-| In-memory frame cache limited by size (256 MB, `SPHEREX_FRAME_CACHE_MB`) instead of 256 frames. Stored cutouts no longer keep the unused `VARIANCE` extension. | `service.py`, `spherex.KEEP_HDUS` |
+| In-memory frame cache limited by size (256 MB, `SPHEREX_FRAME_CACHE_MB`) instead of 256 frames. (Stored cutouts briefly left out `VARIANCE`; it is back since the merge with main, because the epoch maps use it.) | `service.py`, `spherex.KEEP_HDUS` |
 
 End-to-end against the running backend (home connection):
 
@@ -70,7 +70,7 @@ A stored layout is only used if the file still has the same total size; otherwis
 
 | Measured (real images) | Without stored layout | With stored layout |
 |---|---|---|
-| One cutout from S3, median of 12 | 1.05 s, 8 requests | **0.34 s, 3 requests** |
+| One cutout from S3, median of 12 | 1.05 s, 8 requests | **0.34 s, 3 requests** (4 since `VARIANCE` is included again) |
 | Result | | byte-identical in all 12 cases; a layout read from S3 also gave identical cutouts from IRSA's copy |
 | Prefetch of a whole view, Barnard's Star (fov 0.10, then 0.09; ~345 frames) | 105 s | 86 s |
 
@@ -116,8 +116,8 @@ the prototype (now `backend/app/cutout.py`) does the same. Nothing about the lay
 
 **Correctness (2 images, compared with IRSA's cutout of the same image, centre and size):** same pixel box, IMAGE,
 ZODI and FLAGS pixels identical, 0 header differences, same wavelength at the target, and the final north-up frame
-the app shows is identical (max difference 0.0). Our file is 121 KB instead of 153 KB because it leaves out
-`VARIANCE`, which nothing in the app reads.
+the app shows is identical (max difference 0.0). (The prototype left out `VARIANCE`; since 2026-11-15 it is included,
+as the epoch maps need it, and the check was repeated: `VARIANCE` identical too, and both files 152,640 bytes.)
 
 **Speed (9 images per run):**
 
@@ -137,7 +137,7 @@ Notes:
   checked identical to the whole-row version.
 - Of the ~1 s per S3 cutout, 0.75 s are four header reads one after another, and only 0.2 s is pixel data. A file's
   headers never change (the URL contains the version), so storing each image's byte layout once cuts a later cutout
-  to one round of 3 parallel requests. About 320 KB of each cutout's download is also header reads (64 KB per read),
+  to one round of parallel requests. About 320 KB of each cutout's download is also header reads (64 KB per read),
   which a stored layout removes too. (Implemented since, see "Stored byte layouts" above.)
 - With 8 workers the per-cutout time goes up: the home connection was probably full (1.7 MB × 9 in 3.3 s). A server
   in a data centre, especially in AWS `us-east-1` next to the bucket, should do better.

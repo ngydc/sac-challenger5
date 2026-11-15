@@ -5,20 +5,20 @@ copy instead of 6.5-12 s from IRSA's cutout service (which streams the whole 4 M
 and the result is bit-identical to IRSA's cutout (same pixel box, pixels, header keywords, wavelength).
 
 How (layout read from the headers at run time, never hard-coded; the docs don't cover byte layouts):
-- IMAGE, VARIANCE and ZODI are plain images stored row by row, so the rows of a cutout are ONE byte range.
+- IMAGE, VARIANCE and ZODI are plain images stored row by row, so the rows of a cutout are one byte range each.
 - FLAGS is tile-compressed with one tile per image row, so its rows are one range of the table's heap, found
   through the row descriptors; astropy's public reader decompresses a small table built from those rows.
 - IRSA's cutout only changes NAXIS1/2 and shifts every CRPIX1*/CRPIX2* keyword (sky, "A" and "W" WCS) by the
   cutout origin (irsa-cutout-service.md describes cutouts; the keyword changes were compared on real files).
   WCS-WAVE is kept whole here; with the shifted CRPIXnW it gives the same wavelengths.
-- Produced HDUs: PRIMARY, IMAGE, FLAGS, ZODI, WCS-WAVE (what spherex.process() needs). VARIANCE (unused) and
-  the PSF extension are never downloaded.
+- Produced HDUs: PRIMARY, IMAGE, FLAGS, VARIANCE, ZODI, WCS-WAVE, i.e. IRSA's cutout without the PSF extension,
+  which is never downloaded. (spherex.process() reads IMAGE/FLAGS/ZODI/WCS-WAVE, the epoch maps also VARIANCE.)
 
 Two phases. Finding where everything sits (read_layout) takes four requests one after another, because each
 header's position depends on the size of the part before it (FLAGS compresses differently in every file);
 it was ~0.75 s of the ~1 s a cutout from S3 takes. The result, a FileLayout, never changes for a file (its URL
 contains the version), so callers can store it and pass it back: a later cutout of the same file (another fov,
-a pan, a nearby target) then needs ONE round of three parallel requests. A stored layout is only trusted if
+a pan, a nearby target) then needs ONE round of four parallel requests. A stored layout is only trusted if
 the file still has the same total size (every reply states it); otherwise it is read again.
 
 Servers: the S3 copy answers single range requests (206). IRSA's file server (nginx) also answers multi-range
@@ -81,11 +81,13 @@ class FileLayout:
     flags_header: str
     flags_desc: bytes  # FLAGS row descriptors: (byte count, heap offset) per image row, big-endian int32
     flags_heap: int  # byte offset of the FLAGS heap
+    var_header: str
+    var_data: int
     zodi_header: str
     zodi_data: int
     wcs_wave: bytes  # the whole WCS-WAVE HDU (header + data)
 
-    FORMAT = 1  # bump when the fields change: stored layouts of another format are ignored
+    FORMAT = 2  # bump when the fields change: stored layouts of another format are ignored (2: + VARIANCE)
 
     def dumps(self) -> bytes:
         d = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -291,8 +293,9 @@ def read_layout(r: Ranged, pool: ThreadPoolExecutor) -> FileLayout:
     zodi_h, zodi_n, _ = _header_at(r, zodi_off)
     if (var_h.get("EXTNAME"), zodi_h.get("EXTNAME")) != ("VARIANCE", "ZODI"):
         raise RuntimeError(f"unexpected HDU order: {var_h.get('EXTNAME')}, {zodi_h.get('EXTNAME')}")
-    if (zodi_h["NAXIS1"], zodi_h["NAXIS2"], zodi_h["BITPIX"]) != (img_h["NAXIS1"], img_h["NAXIS2"], img_h["BITPIX"]):
-        raise RuntimeError("ZODI and IMAGE differ in shape or type")
+    for h in (var_h, zodi_h):
+        if (h["NAXIS1"], h["NAXIS2"], h["BITPIX"]) != (img_h["NAXIS1"], img_h["NAXIS2"], img_h["BITPIX"]):
+            raise RuntimeError(f"{h.get('EXTNAME')} and IMAGE differ in shape or type")
 
     # WCS-WAVE from the end of the file (file sizes are multiples of 2880, so block starts are known)
     tail = tail_f.result()
@@ -313,17 +316,18 @@ def read_layout(r: Ranged, pool: ThreadPoolExecutor) -> FileLayout:
         size=r.size, primary=prim_h.tostring(), image_header=img_h.tostring(), image_data=img_data,
         flags_header=flags_h.tostring(), flags_desc=bytes(buf[flags_n:flags_n + desc_len]),
         flags_heap=flags_off + flags_n + flags_h.get("THEAP", desc_len),
+        var_header=var_h.tostring(), var_data=var_off + var_n,
         zodi_header=zodi_h.tostring(), zodi_data=zodi_off + zodi_n, wcs_wave=wave)
 
 
 def cut(r: Ranged, pool: ThreadPoolExecutor, lay: FileLayout, center: SkyCoord, size_deg: float,
         box: tuple[int, int, int, int] | None, multirange: bool) -> bytes:
-    """One round of three parallel requests (IMAGE rows, FLAGS rows, ZODI rows), then assemble the cutout.
+    """One round of four parallel requests (IMAGE, FLAGS, VARIANCE and ZODI rows), then assemble the cutout.
     Raises StaleLayout if the server's file is not the one `lay` describes."""
     st = r.stats
     t0 = time.perf_counter()
     img_h, flags_h = fits.Header.fromstring(lay.image_header), fits.Header.fromstring(lay.flags_header)
-    zodi_h = fits.Header.fromstring(lay.zodi_header)
+    var_h, zodi_h = fits.Header.fromstring(lay.var_header), fits.Header.fromstring(lay.zodi_header)
     x0, y0, nx, ny = box or pixel_box(img_h, center, size_deg)
     st.box = (x0, y0, nx, ny)
     width = img_h["NAXIS1"]
@@ -348,9 +352,10 @@ def cut(r: Ranged, pool: ThreadPoolExecutor, lay: FileLayout, center: SkyCoord, 
     rows = desc[y0:y0 + ny]
     h_lo, h_hi = int(rows[:, 1].min()), int((rows[:, 0] + rows[:, 1]).max())
     img_f = pool.submit(rows_of, lay.image_data)
+    var_f = pool.submit(rows_of, lay.var_data)
     zodi_f = pool.submit(rows_of, lay.zodi_data)
     heap = r.get(lay.flags_heap + h_lo, lay.flags_heap + h_hi - 1)
-    img_res, zodi_res = img_f.result(), zodi_f.result()
+    img_res, var_res, zodi_res = img_f.result(), var_f.result(), zodi_f.result()
     st.round_trips += 1
     st.t_data = time.perf_counter() - t0
     if r.size != lay.size:
@@ -363,7 +368,7 @@ def cut(r: Ranged, pool: ThreadPoolExecutor, lay: FileLayout, center: SkyCoord, 
         arr = np.frombuffer(data, dtype=dtype).reshape(ny, -1)
         return arr if cols_only else arr[:, x0:x0 + nx]
 
-    img, zodi = as_image(img_res), as_image(zodi_res)
+    img, var, zodi = as_image(img_res), as_image(var_res), as_image(zodi_res)
 
     # FLAGS: a small compressed table with only these rows, decompressed by astropy's public reader
     sub_h = flags_h.copy()
@@ -381,6 +386,7 @@ def cut(r: Ranged, pool: ThreadPoolExecutor, lay: FileLayout, center: SkyCoord, 
         fits.PrimaryHDU(header=fits.Header.fromstring(lay.primary)),
         fits.ImageHDU(img, header=_shift_crpix(img_h, x0, y0, nx, ny)),
         fits.ImageHDU(flags, header=_shift_crpix(flags_img_h, x0, y0, nx, ny)),
+        fits.ImageHDU(var, header=_shift_crpix(var_h, x0, y0, nx, ny)),
         fits.ImageHDU(zodi, header=_shift_crpix(zodi_h, x0, y0, nx, ny)),
         fits.BinTableHDU.fromstring(lay.wcs_wave),
     ])
@@ -392,7 +398,7 @@ def cut(r: Ranged, pool: ThreadPoolExecutor, lay: FileLayout, center: SkyCoord, 
 def range_cutout(url: str, center: SkyCoord, size_deg: float, client: httpx.Client,
                  box: tuple[int, int, int, int] | None = None, stats: Stats | None = None,
                  multirange: bool = False, layout: FileLayout | None = None) -> bytes:
-    """FITS bytes (PRIMARY, IMAGE, FLAGS, ZODI, WCS-WAVE) of a cutout of the file at `url`.
+    """FITS bytes (PRIMARY, IMAGE, FLAGS, VARIANCE, ZODI, WCS-WAVE) of a cutout of the file at `url`.
 
     `layout`: a FileLayout of this file from an earlier cutout (stats.layout returns the one used, so callers
     can store it); skips the four header requests. If the file turns out different, the layout is read again.

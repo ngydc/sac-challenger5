@@ -54,9 +54,10 @@ DEEP_PART = "deep"
 # SOURCE is deliberately absent: it is set on most pixels (intro notebook).
 BAD_FLAG_NAMES = ("NONFUNC", "HOT", "COLD", "TRANSIENT")
 
-# HDUs kept in a stored cutout (what process() reads). The PSF/EPSF extension is ~96% of an IRSA cutout's bytes
-# and VARIANCE is not used; cutouts made from byte ranges (app/cutout.py) contain exactly these.
-KEEP_HDUS = ("IMAGE", "FLAGS", "ZODI", "WCS-WAVE")
+# HDUs kept in a stored cutout: everything but the PSF/EPSF extension (~96% of an IRSA cutout's bytes, not
+# needed). process() reads IMAGE/FLAGS/ZODI/WCS-WAVE, the epoch maps (app/epochs.py) also VARIANCE.
+# Cutouts made from byte ranges (app/cutout.py) contain exactly these.
+KEEP_HDUS = ("IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE")
 
 
 # --------------------------------------------------------------------------------------------
@@ -232,7 +233,7 @@ class LayoutCache(Protocol):
 
 def download_cutout(record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client,
                     retries: int = 6, layouts: LayoutCache | None = None) -> bytes:
-    """A cutout as FITS bytes (IMAGE, FLAGS, ZODI, WCS-WAVE; no PSF), identical to what IRSA's cutout service
+    """A cutout as FITS bytes (IMAGE, FLAGS, VARIANCE, ZODI, WCS-WAVE; no PSF), identical to what IRSA's cutout service
     returns for cutout_url(record, center, size_deg), so both share one cache key.
 
     Sources, fastest first (docs/FETCH_SPEED.md): our own cutout from byte ranges of the S3 copy (~1 s, no rate

@@ -47,7 +47,7 @@ def correctness(client: httpx.Client) -> list[dict]:
         dy = round(b["IMAGE"].header["CRPIX2"] - a["IMAGE"].header["CRPIX2"])
         res = {"frame": f"{rec.obs_id}-{rec.detector}", "irsa_shape": a["IMAGE"].data.shape,
                "our_shape": b["IMAGE"].data.shape, "box_offset_px (irsa - ours)": (dx, dy)}
-        for ext in ("IMAGE", "ZODI", "FLAGS"):
+        for ext in ("IMAGE", "ZODI", "FLAGS", "VARIANCE"):
             A, B = a[ext].data, b[ext].data
             # overlap: pixel (i, j) of IRSA's cutout is pixel (i + dy, j + dx) of ours
             ys, xs = slice(max(0, -dy), min(A.shape[0], B.shape[0] - dy)), slice(max(0, -dx), min(A.shape[1], B.shape[1] - dx))
@@ -58,7 +58,7 @@ def correctness(client: httpx.Client) -> list[dict]:
             res[f"{ext}_overlap_px"] = int(Ao.size)
         # headers: every key IRSA has in IMAGE must match ours, CRPIX after the box offset
         bad = []
-        for ext in ("IMAGE", "FLAGS", "ZODI"):
+        for ext in ("IMAGE", "FLAGS", "VARIANCE", "ZODI"):
             ha, hb = a[ext].header, b[ext].header
             for k in ha:
                 if k in ("NAXIS1", "NAXIS2", "CHECKSUM", "DATASUM", "") or k.startswith(("XTENSION", "PCOUNT", "GCOUNT", "COMMENT", "HISTORY")):
@@ -100,7 +100,7 @@ def multirange(client: httpx.Client) -> dict:
     whole = range_cutout(rec.access_url, SPEC.center, SPEC.cutout_size, client)
     cols = range_cutout(rec.access_url, SPEC.center, SPEC.cutout_size, client, multirange=True)
     a, b = fits.open(io.BytesIO(whole)), fits.open(io.BytesIO(cols))
-    same = all(np.array_equal(a[e].data, b[e].data, equal_nan=e != "FLAGS") for e in ("IMAGE", "ZODI", "FLAGS"))
+    same = all(np.array_equal(a[e].data, b[e].data, equal_nan=e != "FLAGS") for e in ("IMAGE", "ZODI", "FLAGS", "VARIANCE"))
     print("multi-range cutout identical to whole-row cutout:", same)
     recs = every[200:218]
     items = [(r.access_url, r) for r in recs]
