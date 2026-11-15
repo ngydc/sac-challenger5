@@ -122,6 +122,7 @@ import { SpectrumPanel } from './spectrum-panel';
                 [position]="pos"
                 [x]="p.x"
                 [y]="p.y"
+                [height]="grid().height"
                 (closed)="s.pick.set(null)"
               />
             }

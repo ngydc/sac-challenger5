@@ -1,19 +1,29 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { EpochsApi } from './epochs-api.service';
+import { ApiService } from './api.service';
 import { ViewerState } from './viewer-state.service';
-import { Bundle, EpochsConfig, EpochsStatus, Position } from '../models/epochs.models';
+import { AnalysisStatus, Bundle, Position } from '../models/epochs.models';
 import { EXAMPLES, Example } from '../examples';
 
 export type Group = 'detector' | 'all';
 
 const POLL_MS = 4000;
-/** docs/API_EPOCHS.md: "IRSA delivers about 20 cutouts per minute". Used until a rate has been measured. */
-const FALLBACK_IMAGES_PER_S = 20 / 60;
+/** Measured 2026-11-15 (docs/FETCH_SPEED.md): about 3 images per second. Used until a rate has been measured. */
+const FALLBACK_IMAGES_PER_S = 3;
 const EXPLAINER_KEY = 'spherex-blink.deep-explainer-open';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const same = (a: Position | null, b: Position | null) =>
-  !!a && !!b && a.ra === b.ra && a.dec === b.dec && a.fov === b.fov;
+  !!a &&
+  !!b &&
+  a.ra === b.ra &&
+  a.dec === b.dec &&
+  a.fov === b.fov &&
+  a.pmra === b.pmra &&
+  a.pmdec === b.pmdec &&
+  a.pm_epoch === b.pm_epoch;
+const busy = (s: AnalysisStatus | null) =>
+  !!s && (s.state === 'queued' || s.state === 'running' || s.refreshing);
 
 function readFlag(key: string, fallback: boolean): boolean {
   try {
@@ -25,23 +35,23 @@ function readFlag(key: string, fallback: boolean): boolean {
 }
 
 /**
- * State of the "Deep Analysis" panel: the difference pictures of the epoch maps (docs/API_EPOCHS.md)
- * for the object searched on the main page.
+ * State of the "Deep Analysis" panel: the difference pictures of the epoch maps (docs/API_ANALYSIS.md) for
+ * the view on the main page (the same target, field of view and proper motion as the slider picture).
  *
- * Rule: opening the panel asks for the status (GET /api/epochs). Computed results (e.g. the examples) and
- * running computations are shown at once. Only `showImages()`, the user's "Start deep analysis" click,
- * calls POST /api/compute, because that downloads hundreds of images and takes tens of minutes.
+ * Rule: opening the panel asks for the state only (GET /api/analysis?start=false). Computed results (e.g. the
+ * examples) and running computations are shown at once. Only `showImages()`, the user's "Start deep analysis"
+ * click, starts a computation (GET /api/analysis), because it may download a few hundred images.
  */
 @Injectable({ providedIn: 'root' })
 export class EpochsStore {
   private readonly api = inject(EpochsApi);
+  private readonly mainApi = inject(ApiService);
   private readonly viewer = inject(ViewerState);
 
   /** The panel is open: the stage shows the difference pictures instead of the slider picture. */
   readonly open = signal(false);
-  readonly config = signal<EpochsConfig | null>(null);
   readonly position = signal<Position | null>(null);
-  readonly status = signal<EpochsStatus | null>(null);
+  readonly status = signal<AnalysisStatus | null>(null);
   readonly checking = signal(false);
   readonly starting = signal(false);
   readonly error = signal<string | null>(null);
@@ -62,8 +72,10 @@ export class EpochsStore {
   private started = false;
 
   readonly result = computed(() => this.status()?.result ?? null);
-  readonly running = computed(() => this.status()?.status === 'running');
-  readonly version = computed(() => this.result()?.searched_at ?? '');
+  /** Queued, being computed, or a complete result being recomputed with new images. */
+  readonly running = computed(() => busy(this.status()));
+  /** Changes when the result was recomputed: part of the picture URLs, so new pictures load. */
+  readonly version = computed(() => this.result()?.images_key ?? '');
 
   /** Bundles of the selected grouping, in the backend's order. */
   readonly bundles = computed<Bundle[]>(() => {
@@ -95,20 +107,15 @@ export class EpochsStore {
     return (pr.total - pr.done) / (this.rate() ?? FALLBACK_IMAGES_PER_S);
   });
 
-  get defaultFov(): number {
-    return this.config()?.default_fov ?? this.status()?.default_fov ?? 0.08;
-  }
-
   constructor() {
-    // Follow the object searched on the main page while the panel is open. Its position is the one
-    // GET /api/resolve returned, which for the five test targets is exactly the precomputed one. The field
-    // of view is the epoch maps' own default (GET /api/config): that is what the precomputed results use.
+    // Follow the view of the main page while the panel is open: the same target as the slider picture
+    // (position from GET /api/resolve, its field of view, its proper motion). For the five test targets with
+    // their default field of view that is exactly what the backend precomputed.
     effect(() => {
-      const t = this.viewer.resolved()?.target;
+      const t = this.viewer.target();
       const open = this.open();
-      const cfg = this.config();
-      if (!open || !t || !cfg) return;
-      untracked(() => void this.setPosition({ ra: t.ra, dec: t.dec, fov: cfg.default_fov }));
+      if (!open || !t) return;
+      untracked(() => void this.setPosition(t));
     });
     effect(() => {
       const open = this.explainerOpen();
@@ -120,24 +127,14 @@ export class EpochsStore {
     });
   }
 
-  /** Opens or closes the panel; the first opening loads the config and the example positions. */
+  /** Opens or closes the panel; the first opening loads the example positions. */
   toggle(open = !this.open()): void {
     this.open.set(open);
     if (open && !this.started) {
       this.started = true;
-      void this.loadConfig();
       void this.loadExamples();
     }
     if (!open) this.closeDetail();
-  }
-
-  private async loadConfig(): Promise<void> {
-    try {
-      this.config.set(await this.api.config());
-    } catch (e) {
-      this.started = false;
-      this.error.set(friendly(e));
-    }
   }
 
   private async loadExamples(): Promise<void> {
@@ -145,7 +142,7 @@ export class EpochsStore {
     await Promise.all(
       EXAMPLES.map(async (e) => {
         try {
-          const r = await this.api.resolve(e.name);
+          const r = await this.mainApi.resolve(e.name);
           out[e.name] = { ra: r.target.ra, dec: r.target.dec };
         } catch {
           /* then that example is simply not recognised */
@@ -171,8 +168,8 @@ export class EpochsStore {
       this.status.set(s);
       // Already computed (e.g. the examples) or being computed: show it at once, nothing new is computed.
       // Only an uncomputed position waits for the user to start the (slow) analysis.
-      if (s.status === 'cached' || s.status === 'running') this.showing.set(true);
-      if (s.status === 'running') void this.poll(gen);
+      if (s.state === 'ready' || busy(s)) this.showing.set(true);
+      if (busy(s)) void this.poll(gen);
     } catch (e) {
       if (gen === this.generation) this.error.set(friendly(e));
     } finally {
@@ -186,18 +183,18 @@ export class EpochsStore {
     const s = this.status();
     if (!p || !s) return;
     this.error.set(null);
-    if (s.status === 'cached' || s.status === 'running') {
+    if (s.state === 'ready' || busy(s)) {
       this.showing.set(true);
       return;
     }
     this.starting.set(true);
     const gen = ++this.generation;
     try {
-      const started = await this.api.compute(p);
+      const started = await this.api.start(p);
       if (gen !== this.generation) return;
       this.status.set(started);
       this.showing.set(true);
-      if (started.status === 'running') void this.poll(gen);
+      if (busy(started)) void this.poll(gen);
     } catch (e) {
       this.error.set(friendly(e));
     } finally {
@@ -209,7 +206,7 @@ export class EpochsStore {
   private async poll(gen: number): Promise<void> {
     this.samples = [];
     this.rate.set(null);
-    while (gen === this.generation && this.status()?.status === 'running') {
+    while (gen === this.generation && busy(this.status())) {
       await sleep(POLL_MS);
       if (gen !== this.generation) return;
       const p = this.position();
@@ -225,7 +222,7 @@ export class EpochsStore {
     }
   }
 
-  private measureRate(s: EpochsStatus): void {
+  private measureRate(s: AnalysisStatus): void {
     const pr = s.progress;
     if (!pr || pr.total <= 0) return;
     this.samples.push({ t: Date.now() / 1000, done: pr.done });

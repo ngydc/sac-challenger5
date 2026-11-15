@@ -40,7 +40,7 @@ from astropy.time import Time
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
-from app import epochs, presets, spherex  # noqa: E402
+from app import analysis, db, presets, spherex  # noqa: E402
 
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]  # D1..D6, as in survey_coverage
 
@@ -57,7 +57,7 @@ def main():
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    cache = epochs.FileCalibCache()  # backend/cache/calib/, git-ignored
+    cache = db.store  # calibration files are cached in the database, as everywhere else
 
     p = presets.find_preset(args.target)
     if p is None:
@@ -80,7 +80,9 @@ def main():
 
     # channel index at the target pixel, from the release's own Spectral Channels file
     with httpx.Client(timeout=120, follow_redirects=True) as client:
-        chan_files = {rel: epochs.load_channels(rel, client, cache) for rel in {spherex.release_of(e.record) for e in exps}}
+        chan_files = {rel: spherex.load_calibration(client, cache, spherex.calibration_keys(client, rel, "spectral_channels")[-1],
+                                                    "spectral_channels", analysis.parse_channels)
+                      for rel in {spherex.release_of(e.record) for e in exps}}
     nchan = {c["nchan"] for c in chan_files.values()}
     assert len(nchan) == 1, f"releases disagree on NCHAN: {nchan}"
     nchan = nchan.pop()

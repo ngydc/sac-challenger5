@@ -18,7 +18,6 @@ Measurements behind these choices: docs/FETCH_SPEED.md.
 """
 from __future__ import annotations
 
-import hashlib
 import io
 import itertools
 import logging
@@ -33,25 +32,21 @@ from dataclasses import asdict, dataclass, field, fields
 
 import httpx
 import numpy as np
-import astropy.units as u
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.time import Time
 
-from . import db, presets, spherex
+from . import db, spherex
+from .core import (  # noqa: F401 - re-exported: older code imports these from here
+    CUTOUT_FACTOR, FOV_MAX, FOV_MIN, PIXEL_SCALE_ARCSEC, VISIT_GAP_DAYS, ApiError, TargetSpec, frame_id, iso,
+    parse_coord, split_frame_id,
+)
 
 log = logging.getLogger("spherex.service")
 
 # --- settings -------------------------------------------------------------------------------
-PIXEL_SCALE_ARCSEC = 6.15  # SPHEREx pixel size (docs/spherex/user-guide-data-products.md; header measures 6.15)
-CUTOUT_FACTOR = 1.45  # cutout side / view side: images are rotated vs north, a square this much larger always
-#                      fills the north-up view (needs sqrt(2) at worst; IRSA's cost barely depends on size)
-FOV_MIN, FOV_MAX = 0.01, 0.30  # degrees
-VISIT_GAP_DAYS = 30.0  # a gap longer than this between images starts a new visit (observing season)
 WORKERS = int(os.environ.get("SPHEREX_WORKERS", "8"))  # parallel cutout downloads (mostly S3; IRSA itself is
 #                                                       capped separately by spherex.IRSA_SLOTS)
 PREFETCH = os.environ.get("SPHEREX_PREFETCH", "1") != "0"  # fetch every frame of a view once its coverage is ready
-PRIORITY_USER, PRIORITY_PREFETCH = 0, 1
+PRIORITY_USER, PRIORITY_PREFETCH, PRIORITY_ANALYSIS = 0, 1, 2  # lower runs first; only prefetch may be cancelled
 COVERAGE_TTL_S = 3600.0  # re-search after this long, so new weekly data appears
 REFRESH_RETRY_S = 120.0  # a failed refresh is retried after this long (the old data keeps being served)
 ERROR_RETRY_S = 15.0  # a failed first build is retried after this long
@@ -61,107 +56,6 @@ SEARCH_RETRIES = 4  # IRSA's search service returns 502 now and then
 MAX_ALIGNED_BYTES = int(os.environ.get("SPHEREX_FRAME_CACHE_MB", "256")) * 1_000_000  # aligned frames in memory
 #   (~20 KB per frame at fov 0.08, ~250 KB at fov 0.3; a count limit was smaller than one target's 350 frames)
 RECORD_FIELDS = [f.name for f in fields(spherex.ImageRecord)]
-
-
-class ApiError(Exception):
-    """An error with an HTTP status and a stable machine-readable code (see docs/API.md)."""
-
-    def __init__(self, status: int, code: str, message: str):
-        super().__init__(message)
-        self.status, self.code, self.message = status, code, message
-
-
-# --- target ---------------------------------------------------------------------------------
-def parse_coord(ra: str, dec: str) -> tuple[float, float]:
-    """RA/Dec as decimal degrees ("269.452", "4.6934") or sexagesimal ("17h57m48.5s", "+04d41m36s",
-    "17:57:48.5"). Returns degrees."""
-    ra, dec = str(ra).strip(), str(dec).strip()
-    try:
-        return float(ra), float(dec)
-    except ValueError:
-        pass
-    try:
-        c = SkyCoord(f"{ra} {dec}", unit=(u.hourangle, u.deg))
-    except Exception as err:
-        raise ApiError(400, "bad_coordinates", f"cannot read RA/Dec '{ra}' '{dec}': {err}") from err
-    return float(c.ra.deg), float(c.dec.deg)
-
-
-@dataclass(frozen=True)
-class TargetSpec:
-    """What the user is looking at: a sky position, a field of view and (optionally) the object's motion."""
-
-    ra: float  # deg, centre of the view (fixed on the sky)
-    dec: float
-    fov_deg: float
-    pmra: float | None = None  # mas/yr incl. cos(dec); with pmdec and pm_epoch, makes the predicted position move
-    pmdec: float | None = None
-    pm_epoch: float | None = None  # decimal year at which (ra, dec) is the object's position
-
-    @staticmethod
-    def build(ra: str, dec: str, fov: float, pmra: float | None, pmdec: float | None,
-              pm_epoch: float | None) -> "TargetSpec":
-        r, d = parse_coord(ra, dec)
-        if not (0 <= r < 360 or r == 360) or not (-90 <= d <= 90):
-            raise ApiError(400, "bad_coordinates", f"RA must be 0-360 deg and Dec -90..90 deg, got {r}, {d}")
-        if not (FOV_MIN <= fov <= FOV_MAX):
-            raise ApiError(400, "bad_fov", f"fov must be {FOV_MIN}-{FOV_MAX} degrees, got {fov}")
-        if len({pmra is None, pmdec is None, pm_epoch is None}) != 1:
-            raise ApiError(400, "bad_motion", "pmra, pmdec and pm_epoch must be given together, or not at all")
-        return TargetSpec(round(r % 360.0, 6), round(d, 6), round(fov, 5), pmra, pmdec, pm_epoch)
-
-    @property
-    def key(self) -> str:
-        """Identifies the view (position, fov, motion): used for the frames shown."""
-        raw = f"{self.ra:.6f},{self.dec:.6f},{self.fov_deg:.5f},{self.pmra},{self.pmdec},{self.pm_epoch}"
-        return hashlib.sha1(raw.encode()).hexdigest()[:12]
-
-    @property
-    def coverage_key(self) -> str:
-        """Identifies the search (position and motion, NOT fov): one coverage serves every fov."""
-        raw = f"{self.ra:.6f},{self.dec:.6f},{self.pmra},{self.pmdec},{self.pm_epoch}"
-        return "p" + hashlib.sha1(raw.encode()).hexdigest()[:11]
-
-    @property
-    def edge_margin_deg(self) -> float:
-        """Smallest distance of the view centre from an image edge so the whole view lies inside the image
-        (half the diagonal of the view: images are rotated against north)."""
-        return self.fov_deg / 2 * math.sqrt(2)
-
-    @property
-    def center(self) -> SkyCoord:
-        return SkyCoord(self.ra * u.deg, self.dec * u.deg)
-
-    @property
-    def cutout_size(self) -> float:
-        return round(self.fov_deg * CUTOUT_FACTOR, 5)
-
-    @property
-    def n_pix(self) -> int:
-        return int(math.ceil(self.fov_deg * 3600 / PIXEL_SCALE_ARCSEC))
-
-    def at(self, mjd: float) -> SkyCoord:
-        """Where the target is predicted to be at time `mjd` (the view centre if no motion was given)."""
-        if self.pmra is None:
-            return self.center
-        years = (mjd - presets.epoch_to_mjd(self.pm_epoch)) / 365.25
-        ra, dec = presets.propagate(self.ra, self.dec, self.pmra, self.pmdec, years)
-        return SkyCoord(ra * u.deg, dec * u.deg)
-
-
-def frame_id(record: spherex.ImageRecord) -> str:
-    return f"{record.obs_id}-{record.detector}"
-
-
-def split_frame_id(fid: str) -> tuple[str, str]:
-    obs_id, sep, det = fid.rpartition("-")
-    if not sep or not obs_id or not (len(det) == 2 and det[0] == "D" and det[1].isdigit()):
-        raise ApiError(400, "bad_frame_id", f"frame id must look like '2025W35_2A_0611_1-D2', got '{fid}'")
-    return obs_id, det
-
-
-def iso(mjd: float) -> str:
-    return Time(mjd, format="mjd").isot[:19] + "Z"
 
 
 # --- job queue ------------------------------------------------------------------------------
@@ -211,6 +105,8 @@ class CoverageView:
     exposures: list[spherex.Exposure]  # located images, time order
     visits: list[list[spherex.ImageRecord]]  # one list of images per visit
     visit_of: dict[str, int]  # frame_id -> visit index
+    collections: list[str] = field(default_factory=list)  # collections searched
+    data_as_of: float = 0.0  # when the search results came from IRSA (Unix time)
 
 
 @dataclass
@@ -243,7 +139,8 @@ class Coverage:
             state=self.state, message=self.message, located=self.located, total=self.total,
             records={frame_id(r): r for r in recs},
             exposures=[e for e in self.exposures if frame_id(e.record) in keep],
-            visits=visits, visit_of={frame_id(r): i for i, v in enumerate(visits) for r in v})
+            visits=visits, visit_of={frame_id(r): i for i, v in enumerate(visits) for r in v},
+            collections=list(self.collections), data_as_of=self.data_as_of)
 
 
 @dataclass
@@ -270,7 +167,7 @@ class Service:
         self._jobs = JobQueue(WORKERS)
         self._inflight: dict[str, Future] = {}  # cutout key -> running or queued download
         self._job: dict[str, tuple[object, int]] = {}  # cutout key -> (job function, best priority queued)
-        self._wanted: set[str] = set()  # cutout keys a user asked for (never cancelled as stale prefetch)
+        self._wanted: set[str] = set()  # cutout keys a user or an analysis asked for (never cancelled as stale prefetch)
         self._prefetch_view: dict[str, str] = {}  # coverage_key -> spec.key of the view being prefetched
         self._prefetch_jobs: dict[str, list[tuple[str, Future]]] = {}  # coverage_key -> its queued downloads
         self._aligned: OrderedDict[tuple, AlignedFrame] = OrderedDict()  # hot frames, in memory only
@@ -349,10 +246,12 @@ class Service:
         return cols, spherex.filter_records(recs, spec.center, min_edge_margin_deg=0.0)
 
     # -- coverage ----------------------------------------------------------------------------
-    def coverage(self, spec: TargetSpec) -> CoverageView:
+    def coverage(self, spec: TargetSpec, all_images: bool = False) -> CoverageView:
         """The current knowledge about `spec`'s position, filtered for its fov. Starts a background build the
         first time (and after errors or when the data is older than COVERAGE_TTL_S); callers poll until
-        state == "ready". Once ready, every frame of this view is prefetched in the background."""
+        state == "ready". Once ready, every frame of this view is prefetched in the background.
+        `all_images=True` returns every image that contains the position, also where the view would cross the
+        image edge (the epoch maps use those too: their pictures simply have no data there)."""
         with self._lock:
             ck = spec.coverage_key
             cov = self._cov.get(ck)
@@ -370,7 +269,7 @@ class Service:
         view = cov.view(spec.fov_deg)
         if view.state == "ready":
             self._start_prefetch(spec, view)
-        return view
+        return cov.view(0.0) if all_images else view
 
     def _build(self, cov: Coverage, replaces: Coverage | None) -> None:
         def progress(done: int, total: int) -> None:
@@ -464,6 +363,15 @@ class Service:
                         fut.cancel()
 
     # -- cutouts -----------------------------------------------------------------------------
+    @property
+    def http(self) -> httpx.Client:
+        """The shared HTTP client (connection pool sized for the download workers)."""
+        return self._client
+
+    def cutout_data(self, spec: TargetSpec, record: spherex.ImageRecord) -> bytes | None:
+        """The stored cutout of `record` for `spec`'s view (FITS bytes), or None if not downloaded."""
+        return self.db.cutout(self._cutout_ref(spec, record)[0])
+
     @staticmethod
     def _cutout_ref(spec: TargetSpec, record: spherex.ImageRecord) -> tuple[str, str]:
         url = spherex.cutout_url(record, spec.center, spec.cutout_size)
@@ -492,8 +400,9 @@ class Service:
         return self.frame_states(spec, [record])[0]
 
     def _join(self, key: str, fut: Future, priority: int) -> Future:
-        """Share a pending download; a user (priority 0) waiting on a queued prefetch moves it to the front."""
-        if priority == PRIORITY_USER:
+        """Share a pending download; a user (priority 0) waiting on a queued prefetch moves it to the front.
+        Anyone but the prefetch marks it as wanted, so a stale prefetch's cancellation leaves it alone."""
+        if priority != PRIORITY_PREFETCH:
             self._wanted.add(key)
         job, queued = self._job.get(key, (None, priority))
         if job is not None and priority < queued and not fut.running():
@@ -537,7 +446,7 @@ class Service:
             fut = self._jobs.submit(priority, job)
             self._inflight[key] = fut
             self._job[key] = (job, priority)
-            if priority == PRIORITY_USER:
+            if priority != PRIORITY_PREFETCH:
                 self._wanted.add(key)
 
             def done(_f: Future, key=key) -> None:

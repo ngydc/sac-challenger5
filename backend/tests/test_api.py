@@ -269,9 +269,9 @@ def test_resolve_input_errors():
 
 # --- the contract is exactly the MVP ---------------------------------------------------------
 def test_only_the_three_mvp_endpoints_exist():
-    # the epoch-map endpoints (app/epochs_api.py, tests in test_epochs.py) are a separate group
+    # the deep-analysis endpoints (app/analysis_api.py, tests in test_analysis_jobs.py) are a separate group
     paths = {p for p, ops in app.openapi()["paths"].items()
-             if not all("4. Epoch maps" in op.get("tags", []) for op in ops.values())}
+             if not all("4. Deep analysis" in op.get("tags", []) for op in ops.values())}
     assert paths == {"/api/resolve", "/api/coverage", "/api/frames/{frame_id}/image.png"}
     for gone in ("/api/presets", "/api/status", "/api/frames/A-D1/pixels"):
         assert client.get(gone).status_code == 404
@@ -546,3 +546,16 @@ def test_a_requeued_job_runs_once():
     fut.result(5)
     time.sleep(0.05)
     assert runs == [1]
+
+
+def test_a_download_the_analysis_waits_for_is_not_cancelled_by_a_zoom(one_worker):
+    s, gate, order = one_worker
+    small = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    recs = seed_coverage(small, svc_obj=s)
+    s.coverage(small)
+    wait_for(lambda: small.coverage_key in s._prefetch_jobs and len(order) == 1)
+    shared = s.ensure_cutout(small, recs[-1], priority=svc.PRIORITY_ANALYSIS)  # joins the queued prefetch download
+    s.coverage(TargetSpec.build(POS["ra"], POS["dec"], 0.1, None, None, None))  # zoom: stale prefetch is cancelled
+    assert not shared.cancelled()
+    gate.set()
+    shared.result(5)

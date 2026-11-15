@@ -55,7 +55,7 @@ DEEP_PART = "deep"
 BAD_FLAG_NAMES = ("NONFUNC", "HOT", "COLD", "TRANSIENT")
 
 # HDUs kept in a stored cutout: everything but the PSF/EPSF extension (~96% of an IRSA cutout's bytes, not
-# needed). process() reads IMAGE/FLAGS/ZODI/WCS-WAVE, the epoch maps (app/epochs.py) also VARIANCE.
+# needed). process() reads IMAGE/FLAGS/ZODI/WCS-WAVE, the epoch maps (app/analysis.py) also VARIANCE.
 # Cutouts made from byte ranges (app/cutout.py) contain exactly these.
 KEEP_HDUS = ("IMAGE", "FLAGS", "VARIANCE", "ZODI", "WCS-WAVE")
 
@@ -481,57 +481,76 @@ def _image_header_from(url: str, client: httpx.Client, chunk: int) -> fits.Heade
             raise ValueError(f"no IMAGE header found in {url}")
 
 
-# Process-wide, so a coverage lookup after the first one needs no database or S3 access for the maps.
-# Keyed by content: DR1 and QR3 ship byte-identical files under different keys (measured 2026-11-14).
+# Calibration files (Spectral WCS for the wavelength at the target, Spectral Channels for the epoch maps).
+# Process-wide caches, so only the first use after a start needs the database or S3:
+# - the S3 listing of a product directory, per release, renewed after CALIB_LIST_TTL_S;
+# - each file's parsed content, keyed by the file's content hash: DR1 and QR3 ship byte-identical files
+#   under different keys (measured 2026-11-14), so they share one parsed copy.
 _calib_lock = threading.Lock()
-_calib_keys: dict[str, tuple[float, list[str]]] = {}  # release -> (listed at, S3 keys)
+_calib_keys: dict[tuple[str, str], tuple[float, list[str]]] = {}  # (release, product) -> (listed at, S3 keys)
 _calib_digest: dict[str, str] = {}  # S3 key -> sha256 of the file
-_calib_maps: dict[str, tuple[np.ndarray, np.ndarray]] = {}  # sha256 -> (CWAVE, CBAND), float32, ~33 MB each
+_calib_parsed: dict[tuple[str, str], object] = {}  # (kind, sha256) -> parsed content
+
+
+def calibration_keys(client: httpx.Client, release: str, product: str) -> list[str]:
+    """S3 keys of the FITS files under <release>/<product>/ (e.g. "dr1", "spectral_channels"), sorted, so the
+    newest version sorts last. The directory names follow user-guide-data-products.md; nothing else is assumed."""
+    listed = _calib_keys.get((release, product))
+    if listed is None or time.time() - listed[0] > CALIB_LIST_TTL_S:
+        resp = client.get(S3_BUCKET_URL, params={"list-type": "2", "prefix": f"{release}/{product}/"})
+        resp.raise_for_status()
+        listed = (time.time(), sorted(k for k in _xml_values(resp.text, "Key") if k.endswith(".fits")))
+        _calib_keys[(release, product)] = listed
+    return listed[1]
+
+
+def load_calibration(client: httpx.Client, cache: CalibrationCache | None, key: str, kind: str,
+                     parse: Callable[[bytes], object]) -> object:
+    """`parse(file bytes)` of the calibration file at S3 `key`, parsed once per process and file content.
+    With a `cache` (app/db.py's Store), the file is downloaded only once at all."""
+    with _calib_lock:
+        digest = _calib_digest.get(key)
+        if digest is None and cache is not None and hasattr(cache, "calibration_digest"):
+            digest = cache.calibration_digest(key)
+        if digest is not None and (kind, digest) in _calib_parsed:
+            _calib_digest[key] = digest
+            return _calib_parsed[(kind, digest)]
+        data = cache.calibration(key) if cache else None
+        if data is None:
+            resp = client.get(f"{S3_BUCKET_URL}/{key}")
+            resp.raise_for_status()
+            data = resp.content
+            if cache:
+                cache.put_calibration(key, data)
+        digest = hashlib.sha256(data).hexdigest()
+        if (kind, digest) not in _calib_parsed:
+            _calib_parsed[(kind, digest)] = parse(data)
+        _calib_digest[key] = digest
+        return _calib_parsed[(kind, digest)]
+
+
+def _parse_spectral_wcs(data: bytes) -> tuple[np.ndarray, np.ndarray]:
+    with fits.open(io.BytesIO(data)) as h:
+        return h["CWAVE"].data.astype(np.float32), h["CBAND"].data.astype(np.float32)
 
 
 class SpectralMaps:
-    """Per-detector CWAVE/CBAND images (microns). The file for each release and detector is found by listing
-    the public S3 bucket (once per release and hour); each distinct file is parsed once per process and, with
-    a `cache`, downloaded only once at all."""
+    """Per-detector CWAVE/CBAND images (microns) from the Spectral WCS product. The file for each release and
+    detector is found by listing the public S3 bucket; see calibration_keys and load_calibration for caching."""
 
     def __init__(self, client: httpx.Client, cache: CalibrationCache | None = None):
         self.client, self.cache = client, cache
 
     def _key(self, release: str, detector: str) -> str:
-        listed = _calib_keys.get(release)
-        if listed is None or time.time() - listed[0] > CALIB_LIST_TTL_S:
-            resp = self.client.get(S3_BUCKET_URL, params={"list-type": "2", "prefix": f"{release}/spectral_wcs/"})
-            resp.raise_for_status()
-            keys = [k for k in _xml_values(resp.text, "Key") if k.endswith(".fits")]
-            listed = _calib_keys[release] = (time.time(), keys)
         n = detector.lstrip("D")
-        keys = [k for k in listed[1] if f"/{n}/" in k]
+        keys = [k for k in calibration_keys(self.client, release, "spectral_wcs") if f"/{n}/" in k]
         if not keys:
             raise FileNotFoundError(f"no spectral WCS file for {release} {detector}")
-        return sorted(keys)[-1]  # newest version sorts last
+        return keys[-1]  # newest version sorts last
 
     def get(self, release: str, detector: str) -> tuple[np.ndarray, np.ndarray]:
-        with _calib_lock:
-            key = self._key(release, detector)
-            digest = _calib_digest.get(key)
-            if digest is None and self.cache is not None and hasattr(self.cache, "calibration_digest"):
-                digest = self.cache.calibration_digest(key)
-            if digest is not None and digest in _calib_maps:
-                _calib_digest[key] = digest
-                return _calib_maps[digest]
-            data = self.cache.calibration(key) if self.cache else None
-            if data is None:
-                resp = self.client.get(f"{S3_BUCKET_URL}/{key}")
-                resp.raise_for_status()
-                data = resp.content
-                if self.cache:
-                    self.cache.put_calibration(key, data)
-            digest = hashlib.sha256(data).hexdigest()
-            if digest not in _calib_maps:
-                with fits.open(io.BytesIO(data)) as h:
-                    _calib_maps[digest] = (h["CWAVE"].data.astype(np.float32), h["CBAND"].data.astype(np.float32))
-            _calib_digest[key] = digest
-            return _calib_maps[digest]
+        return load_calibration(self.client, self.cache, self._key(release, detector), "spectral_wcs",
+                                _parse_spectral_wcs)
 
 
 def _xml_values(text: str, tag: str) -> list[str]:

@@ -29,13 +29,20 @@ import { SiteFooter } from './site-footer';
           @if (d.checking() && !d.status()) {
             <p><span class="spinner inline"></span> Checking whether difference pictures exist…</p>
           } @else if (d.status(); as st) {
-            @switch (st.status) {
-              @case ('cached') {
+            @switch (st.state) {
+              @case ('ready') {
                 <h3><span class="dot ok"></span> Ready</h3>
                 <p class="muted small">
                   {{ st.result?.n_images }} images in {{ st.result?.epochs?.length }} epochs are
                   already processed.
+                  @if (st.refreshing) {
+                    New images were found; an updated version is being made.
+                  }
                 </p>
+              }
+              @case ('queued') {
+                <h3><span class="dot busy"></span> Waiting</h3>
+                <p class="muted small">Other analyses are being computed; this one starts next.</p>
               }
               @case ('running') {
                 <h3><span class="dot busy"></span> Being created</h3>
@@ -70,7 +77,7 @@ import { SiteFooter } from './site-footer';
               }
             }
             <!-- Only when something has to be computed: cached results and running computations show at once. -->
-            @if (st.status === 'not_computed' || st.status === 'error') {
+            @if (st.state === 'idle' || st.state === 'error') {
               <button
                 type="button"
                 class="btn primary big wide"
@@ -81,15 +88,16 @@ import { SiteFooter } from './site-footer';
                   <span class="spinner inline"></span>
                 }
                 {{
-                  st.status === 'error'
+                  st.state === 'error'
                     ? 'Try again (downloads data)'
                     : 'Start deep analysis (downloads data)'
                 }}
               </button>
               <p class="takes-time small">
-                <b>This takes a while:</b> the server downloads a few hundred images of this spot
-                from NASA's archive, which takes tens of minutes. You can keep using the page; the
-                first difference picture appears as soon as one detector is done.
+                <b>This takes a moment:</b> the server averages a few hundred images of this spot
+                from NASA's archive, about two minutes for a new spot (less if its pictures were
+                already loaded above). You can keep using the page; the first difference picture
+                appears as soon as one detector is done.
               </p>
             }
           }

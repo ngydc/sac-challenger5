@@ -1,14 +1,14 @@
-"""Compute the epoch maps of the five challenge test targets, so the API answers for them from the cache.
+"""Compute the deep analysis (and with it the coverage and frames) of the five challenge test targets, by hand.
 
-Only what is missing is computed: a target whose result is complete is skipped, and cached cutouts and
-reprojections are reused. Runs at start-up through docker-compose (service `precompute`).
+The backend does the same by itself at start-up (app/main.py, SPHEREX_PRECOMPUTE=1), in the background. This
+command is for filling the cache without the web server, and it waits until everything is done. It uses the
+same code and the same Postgres cache as the backend: run it while the backend is stopped, or the two may
+compute the same target at the same time (harmless, but twice the work).
 
-    python -m app.precompute                 # all five
+    python -m app.precompute                      # all five
     python -m app.precompute --targets r_dra,barnard
-    python -m app.precompute --refresh       # search IRSA again (new weekly data)
 
-The positions are the ones `GET /api/resolve` returns for these names (moving objects are propagated to the
-current year), and the field of view is epochs.DEFAULT_FOV_DEG, so the frontend's requests hit the cache.
+Needs the database (`docker compose up -d db`, or DATABASE_URL).
 """
 from __future__ import annotations
 
@@ -17,44 +17,44 @@ import logging
 import sys
 import time
 
-from . import epochs, presets, resolver
-
-
-def spec_of(preset: presets.Preset):
-    r = resolver.resolve(preset.name)  # a preset: answered locally, no network
-    return epochs.spec_for(r.ra, r.dec, None)
+from . import presets
+from .analysis_jobs import jobs, preset_specs
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--targets", default=",".join(p.key for p in presets.PRESETS))
-    ap.add_argument("--refresh", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per cutout otherwise
-    failed = 0
-    for key in args.targets.split(","):
-        p = presets.find_preset(key)
-        if p is None:
-            print(f"unknown target {key!r}")
-            failed += 1
-            continue
-        spec = spec_of(p)
-        if epochs.is_complete(spec) and not args.refresh:
-            print(f"{p.name}: cached ({spec.ra}, {spec.dec}, fov {spec.fov_deg})", flush=True)
-            continue
-        t0 = time.time()
-        print(f"{p.name}: computing ({spec.ra}, {spec.dec}, fov {spec.fov_deg}) ...", flush=True)
-        try:
-            meta = epochs.run(spec, args.refresh)
-        except Exception as err:  # noqa: BLE001 - go on with the next target
-            print(f"{p.name}: FAILED: {err}", flush=True)
-            failed += 1
-            continue
-        print(f"{p.name}: done in {time.time() - t0:.0f} s, {meta['n_images']} images, {len(meta['epochs'])} epochs, "
-              f"{len(meta['failed'])} failed ({meta['failed_retryable']} to retry), "
-              f"modes: {{{', '.join(b['id'] + ': ' + b['mode'] for b in meta['bundles'])}}}", flush=True)
-        failed += 1 if meta["failed_retryable"] else 0
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request otherwise
+    wanted = set(args.targets.split(","))
+    unknown = wanted - {p.key for p in presets.PRESETS}
+    if unknown:
+        print(f"unknown targets: {sorted(unknown)}")
+        return 1
+    specs = {p.name: s for p, s in zip(presets.PRESETS, preset_specs()) if p.key in wanted}
+    t0 = time.time()
+    jobs.warm(list(specs.values()))
+    last: dict[str, str] = {}
+    while True:
+        states = {name: jobs.status(spec) for name, spec in specs.items()}
+        for name, st in states.items():
+            pr = st["progress"]
+            line = st["state"] + (f": {pr['stage']} ({pr['done']}/{pr['total']})" if pr else "")
+            if line != last.get(name):
+                print(f"{time.time() - t0:6.0f} s  {name}: {line}", flush=True)
+                last[name] = line
+        if all(st["state"] in ("ready", "error", "idle") for st in states.values()):
+            break
+        time.sleep(2)
+    failed = [name for name, st in states.items() if st["state"] != "ready"]
+    for name, st in states.items():
+        r = st["result"]
+        if r:
+            print(f"{name}: {st['state']}, {r['n_images']} images, {len(r['epochs'])} epochs, {len(r['failed'])} not used, "
+                  f"modes: {', '.join(b['id'] + ' ' + b['mode'] for b in r['bundles'])}")
+        else:
+            print(f"{name}: {st['state']} {st['message'] or ''}")
     return 1 if failed else 0
 
 

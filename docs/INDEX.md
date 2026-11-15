@@ -104,7 +104,7 @@ These existed before the files above were added. They contain the team's own mea
 - **`docs/RESOURCES.md`**: the team's own measurements of the data and the IRSA services (planning tables, test timings), with a table pointing to the official files above for everything else.
 - **`docs/API.md`**: the backend API for the frontend (MVP: `resolve`, `coverage`, `image.png`): how the time and wavelength sliders map onto the data, every endpoint with real example responses, TypeScript client code, the recommended call pattern, error codes and what to expect from the data. The live reference is the backend's `/docs`.
 - **`docs/FETCH_SPEED.md`**: benchmarks of fetching and caching (2026-11-14): IRSA cutouts vs. our own cutouts from byte ranges (S3 and IRSA), coverage-lookup steps, footprint-based locating, local cache costs. Scripts in `backend/scripts/bench/`.
-- **`docs/API_EPOCHS.md`**: the epoch-maps API (`/api/epochs`, `/api/compute`, `/api/frame`, `/api/rgb`, `/api/diff`, `/api/spectrum`, `/api/config`): call pattern, parameters, response fields, precompute.
+- **`docs/API_ANALYSIS.md`**: the deep-analysis API (epoch maps: `/api/analysis` and its pictures and spectra): how it shares target, coverage and cutouts with the viewer, call pattern, response fields, precompute and storage.
 - **`docs/DATA_COVERAGE.md`**: measured coverage of the five test targets (2026-11-14): every image's date, detector and wavelength at the target. Answers "do we get every wavelength every 6 months?" and documents the header + `CWAVE` method and the Barnard's Star pipeline test.
 
 ## Not fetched, or only partly fetched

@@ -57,10 +57,10 @@ import { BundleTile } from './bundle-tile';
               <p class="muted">
                 <span class="spinner inline"></span> Checking whether it has been analysed…
               </p>
-            } @else if (d.status()?.status === 'not_computed' || d.status()?.status === 'error') {
+            } @else if (d.status()?.state === 'idle' || d.status()?.state === 'error') {
               <p class="muted">
                 This spot has not been analysed yet. Start the deep analysis in the panel on the
-                right: it downloads data from NASA's archive and takes tens of minutes.
+                right: it uses data from NASA's archive and takes about two minutes.
               </p>
             }
           }
