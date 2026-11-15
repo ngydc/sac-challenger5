@@ -17,7 +17,7 @@
   <div class="head">
     <label for="time">Time (observing season)</label>
     @if (visitInfo(); as v) {
-      <span class="val">season {{ s.visit() + 1 }} of {{ s.visits().length }}: {{ v.start }} … {{ v.end }} ({{ v.n_frames }} frames)</span>
+      <span class="val num">season {{ s.visit() + 1 }} of {{ s.visits().length }}: {{ v.start }} … {{ v.end }} ({{ v.n_frames }} frames)</span>
     }
   </div>
   <input
@@ -36,7 +36,7 @@
 <section class="slider">
   <div class="head">
     <label for="wl">Wavelength</label>
-    <span class="val">
+    <span class="val num">
       {{ s.wavelength() | number: '1.3-3' }} µm
       @if (s.band(); as b) {
         (band {{ b.min | number: '1.2-2' }}–{{ b.max | number: '1.2-2' }})
@@ -73,8 +73,9 @@
 
 @if (s.picture(); as p) {
   <div class="card" aria-live="polite">
+    <p class="kicker">Current image</p>
     <p><strong>{{ p.wavelength | number: '1.3-3' }} µm</strong> (bandwidth {{ p.bandwidth | number: '1.3-3' }}) · {{ p.time | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC</p>
-    <p class="muted">{{ p.frameId }} · {{ s.pick()?.frame?.release }}</p>
+    <p class="muted num">{{ p.frameId }} · {{ s.pick()?.frame?.release }}</p>
     <p class="muted">flags at the target: {{ p.flags.length ? p.flags.join(', ') : 'none' }}</p>
     @if (saturated()) {
       <p class="notice">The object is saturated here (OVERFLOW): its core values are not reliable.</p>

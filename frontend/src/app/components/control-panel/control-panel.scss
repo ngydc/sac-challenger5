@@ -15,22 +15,38 @@
   flex-direction: column;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.45rem 0.2rem;
+  padding: 0.5rem 0.2rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--fg);
   font: inherit;
   cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
 
+  strong {
+    font-family: var(--font-display);
+    letter-spacing: 0.06em;
+  }
   small {
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
     color: var(--muted);
     white-space: nowrap;
   }
+  &:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-3);
+  }
   &.active {
     border-color: var(--accent);
-    box-shadow: inset 0 -3px 0 var(--accent);
+    background: var(--accent-soft);
+    box-shadow:
+      inset 0 -3px 0 var(--accent),
+      0 0 18px rgb(139 155 255 / 0.2);
   }
 }
 
@@ -38,14 +54,16 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: baseline;
   gap: 0.2rem 1rem;
   margin-bottom: 0.25rem;
 
   label {
+    font-family: var(--font-display);
     font-weight: 600;
   }
   .val {
-    font-size: 0.85rem;
+    font-size: 0.78rem;
     color: var(--muted);
   }
 }
@@ -68,7 +86,8 @@
 
 .card {
   padding: 0.75rem 0.9rem;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   background: var(--surface-2);
   font-size: 0.88rem;
   line-height: 1.45;
@@ -76,6 +95,13 @@
 
   p {
     margin: 0;
+  }
+  .kicker {
+    margin-bottom: 0.3rem;
+    color: var(--muted);
+  }
+  .num {
+    font-size: 0.76rem;
   }
 }
 

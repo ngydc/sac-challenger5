@@ -1,14 +1,13 @@
 import { Component, computed, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ViewerState } from '../../core/services/viewer-state.service';
+import { EXAMPLES } from '../../core/examples';
+import { Logo } from '../logo/logo';
 
-/** Example searches shown on the start screen (the challenge's test targets). */
-const EXAMPLES = ["Barnard's Star", 'Epsilon Indi B', 'WISE 0855', 'RW Aurigae', 'R Draconis'];
-
-/** F1: the frame, as large as the screen allows, with the predicted-position ring and status overlays. */
+/** F1: the start page, then the frame, as large as the screen allows, with the predicted-position ring and status overlays. */
 @Component({
   selector: 'app-viewer',
-  imports: [DatePipe],
+  imports: [DatePipe, Logo],
   templateUrl: './viewer.html',
   styleUrl: './viewer.scss',
 })

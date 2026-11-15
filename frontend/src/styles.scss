@@ -1,23 +1,33 @@
-/* Global styles and color tokens (dark theme). Shared controls live here to keep component styles small. */
+/* Global styles and design tokens (deep-space theme). Shared controls live here to keep component styles small. */
 :root {
-  --bg: #0b0d12;
-  --fg: #e6e8ee;
-  --muted: #8a90a0;
-  --border: #2a2e38;
-  --surface: #15181f;
-  --surface-2: #1d212a;
-  --overlay: rgb(11 13 18 / 0.78);
-  --accent: #22b07d;
-  --accent-soft: rgb(34 176 125 / 0.16);
-  --slider: #2f7cf6;
-  --ring: #ff4d4d;
-  --warn: #f2b84b;
-  --danger: #ff6b6b;
+  --bg: #04050d;
+  --fg: #e9ecff;
+  --muted: #8f97bd;
+  --border: rgb(140 155 255 / 0.16);
+  --border-strong: rgb(140 155 255 / 0.36);
+  --surface: #0a0d1f;
+  --surface-2: #121733;
+  --surface-3: #1a2046;
+  --overlay: rgb(9 12 30 / 0.72);
+  --accent: #8b9bff;
+  --accent-2: #4fd8ff;
+  --accent-3: #c084fc;
+  --accent-soft: rgb(139 155 255 / 0.16);
+  --grad: linear-gradient(120deg, var(--accent-2), var(--accent) 50%, var(--accent-3));
+  --glow: 0 0 0 1px var(--border-strong), 0 0 24px rgb(139 155 255 / 0.22);
+  --ready: #3ee6a0;
+  --ring: #ff5d73;
+  --warn: #ffc857;
+  --danger: #ff7a85;
+  /* These two match the colours the backend paints into the pictures. */
   --no-data: #3a4256;
   --masked: #8b1a1a;
-  --radius: 10px;
-  --shadow: 0 8px 30px rgb(0 0 0 / 0.45);
+  --radius: 14px;
+  --shadow: 0 12px 40px rgb(0 0 0 / 0.55);
   --drawer-w: 400px;
+  --font-display: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Mono', Consolas, monospace;
   color-scheme: dark;
 }
 
@@ -34,17 +44,72 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-body);
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--accent-2);
+  text-underline-offset: 2px;
+}
+
+::selection {
+  background: rgb(139 155 255 / 0.4);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
 :focus-visible {
-  outline: 2px solid var(--slider);
+  outline: 2px solid var(--accent-2);
   outline-offset: 2px;
 }
 
 .muted {
   color: var(--muted);
+}
+
+/* Numbers and identifiers (wavelengths, dates, coordinates). */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Small upper-case label above a heading or a group. */
+.kicker {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.grad-text {
+  background: var(--grad);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.glass {
+  border: 1px solid var(--border);
+  background: var(--overlay);
+  backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow: var(--shadow);
 }
 
 .sr-only {
@@ -56,6 +121,56 @@ body {
   white-space: nowrap;
 }
 
+/* ---- the sky behind everything: nebula glow plus two star layers, one of them twinkling ---- */
+.sky {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 45% at 82% 8%, rgb(124 92 255 / 0.2), transparent 70%),
+    radial-gradient(ellipse 50% 45% at 8% 92%, rgb(40 170 255 / 0.13), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 35% 30%, rgb(192 132 252 / 0.06), transparent 70%),
+    radial-gradient(ellipse at center, #0a0e24 0%, var(--bg) 78%);
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-repeat: repeat;
+  }
+  &::before {
+    background-image:
+      radial-gradient(1px 1px at 23px 41px, #fff, transparent),
+      radial-gradient(1px 1px at 97px 143px, rgb(255 255 255 / 0.8), transparent),
+      radial-gradient(1.4px 1.4px at 171px 67px, #cfd8ff, transparent),
+      radial-gradient(1px 1px at 233px 201px, rgb(255 255 255 / 0.7), transparent),
+      radial-gradient(1px 1px at 61px 251px, rgb(255 255 255 / 0.6), transparent),
+      radial-gradient(1px 1px at 289px 17px, rgb(255 255 255 / 0.75), transparent);
+    background-size: 320px 290px;
+    opacity: 0.55;
+  }
+  &::after {
+    background-image:
+      radial-gradient(1.6px 1.6px at 131px 89px, #fff, transparent),
+      radial-gradient(1.2px 1.2px at 347px 311px, #bfe9ff, transparent),
+      radial-gradient(1.8px 1.8px at 419px 127px, #e3d4ff, transparent),
+      radial-gradient(1.2px 1.2px at 53px 379px, #fff, transparent);
+    background-size: 470px 430px;
+    animation: twinkle 5s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes twinkle {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
 /* ---- buttons ---- */
 .btn {
   display: inline-flex;
@@ -65,23 +180,49 @@ body {
   min-height: 40px;
   padding: 0.45rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--fg);
   font: inherit;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s;
 
   &:hover:not(:disabled) {
-    background: #262b36;
+    border-color: var(--border-strong);
+    background: var(--surface-3);
+    box-shadow: 0 0 18px rgb(139 155 255 / 0.18);
+  }
+  &:active:not(:disabled) {
+    transform: scale(0.97);
   }
   &:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: default;
   }
   &.active {
     border-color: var(--accent);
     background: var(--accent-soft);
+    box-shadow: var(--glow);
+  }
+  &.primary {
+    border-color: transparent;
+    background: var(--grad);
+    color: #060818;
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      background: var(--grad);
+      filter: brightness(1.12);
+    }
+  }
+  &.ghost {
+    border-color: transparent;
+    background: transparent;
   }
   &.icon {
     width: 40px;
@@ -89,9 +230,10 @@ body {
   }
 }
 
-/* ---- range slider (thumb like the reference design) ---- */
+/* ---- range slider ---- */
 input[type='range'] {
   --pct: 0%;
+  --track: linear-gradient(to right, var(--accent-2), var(--accent) var(--pct), var(--surface-3) var(--pct));
   width: 100%;
   height: 28px;
   margin: 0;
@@ -102,28 +244,34 @@ input[type='range'] {
   &::-webkit-slider-runnable-track {
     height: 5px;
     border-radius: 3px;
-    background: linear-gradient(to right, var(--slider) var(--pct), #d8dbe2 var(--pct));
+    background: var(--track);
   }
   &::-moz-range-track {
     height: 5px;
     border-radius: 3px;
-    background: linear-gradient(to right, var(--slider) var(--pct), #d8dbe2 var(--pct));
+    background: var(--track);
   }
   &::-webkit-slider-thumb {
-    width: 24px;
-    height: 24px;
-    margin-top: -9.5px;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    background: #5b6170;
-    appearance: none;
-  }
-  &::-moz-range-thumb {
     width: 20px;
     height: 20px;
+    margin-top: -7.5px;
     border: 2px solid #fff;
     border-radius: 50%;
-    background: #5b6170;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgb(139 155 255 / 0.8);
+    appearance: none;
+    transition: transform 0.1s;
+  }
+  &::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgb(139 155 255 / 0.8);
+  }
+  &:active::-webkit-slider-thumb {
+    transform: scale(1.15);
   }
   &:disabled {
     opacity: 0.4;
@@ -137,7 +285,7 @@ input[type='search'] {
   min-height: 36px;
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--surface-2);
   color: var(--fg);
   font: inherit;
@@ -149,26 +297,12 @@ input[type='checkbox'] {
   accent-color: var(--accent);
 }
 
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgb(255 255 255 / 0.2);
-  border-top-color: var(--fg);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

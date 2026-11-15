@@ -7,8 +7,8 @@ svg {
   width: 100%;
   height: auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  border-radius: 10px;
+  background: rgb(4 5 13 / 0.6);
 }
 
 .col {
@@ -22,7 +22,8 @@ svg {
 
 text {
   fill: var(--muted);
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
 }
 
 .yl {
@@ -30,11 +31,19 @@ text {
 }
 
 circle {
-  fill: #6b7280;
+  fill: #59618a;
   cursor: pointer;
+  transition: fill 0.4s;
 
+  /* Loaded: green and glowing. */
   &.ready {
-    fill: var(--accent);
+    fill: var(--ready);
+    filter: drop-shadow(0 0 3px var(--ready));
+  }
+  /* Being loaded right now. */
+  &.busy {
+    fill: var(--warn);
+    animation: pulse 0.9s ease-in-out infinite alternate;
   }
   &:hover {
     r: 5;
@@ -44,6 +53,13 @@ circle {
     stroke: #fff;
     stroke-width: 2;
     pointer-events: none;
+    filter: drop-shadow(0 0 4px #fff);
+  }
+}
+
+@keyframes pulse {
+  from {
+    opacity: 0.35;
   }
 }
 
@@ -55,5 +71,9 @@ circle {
 }
 
 .g {
-  color: var(--accent);
+  color: var(--ready);
+}
+
+.b {
+  color: var(--warn);
 }

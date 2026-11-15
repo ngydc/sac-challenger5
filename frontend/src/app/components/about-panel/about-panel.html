@@ -1,0 +1,82 @@
+<section>
+  <h3>The mission</h3>
+  <p>
+    <strong>SPHEREx</strong> (Spectro-Photometer for the History of the Universe, Epoch of
+    Reionization and Ices Explorer) is a NASA space telescope launched in March 2025. During its
+    nominal 25-month mission it maps the <strong>entire sky</strong> several times in near-infrared
+    light, and measures a low-resolution spectrum for every point of it.
+  </p>
+  <dl class="facts">
+    <div><dt>Wavelengths</dt><dd class="num">0.75–5.0 µm</dd></div>
+    <div><dt>Spectral channels</dt><dd class="num">102</dd></div>
+    <div><dt>Detectors</dt><dd class="num">6</dd></div>
+    <div><dt>Pixel size</dt><dd class="num">6.15″</dd></div>
+  </dl>
+</section>
+
+<section>
+  <h3>What this tool does</h3>
+  <p>
+    Challenger5 finds every SPHEREx image that covers the position you search for, cuts out the
+    area around it and puts the images in order of observation time. Blinking through the
+    observing seasons makes <strong>moving objects</strong> (nearby stars, brown dwarfs) and
+    <strong>brightness changes</strong> (variable stars) stand out.
+  </p>
+  <p>
+    Each image is a narrow slice of infrared colour, so the wavelength slider lets you scan the
+    same patch of sky from 0.75 to 5 µm.
+  </p>
+</section>
+
+<section>
+  <h3>The data</h3>
+  <p>
+    The tool shows SPHEREx <strong>Level 2 spectral images</strong>: calibrated single exposures
+    in surface-brightness units (MJy/sr), with per-pixel quality flags. They are public and served
+    by the NASA/IPAC Infrared Science Archive (IRSA). The tool reads the current releases, Data
+    Release 1 and Quick Release 3.
+  </p>
+  @if (collections().length) {
+    <p class="muted">Collections behind the current view: <span class="num">{{ collections().join(', ') }}</span></p>
+  }
+  <ul class="links">
+    <li><a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener">SPHEREx at IRSA</a><span>mission page, all services</span></li>
+    <li><a href="https://irsa.ipac.caltech.edu/applications/spherex" target="_blank" rel="noopener">SPHEREx Data Explorer</a><span>browse the archive yourself</span></li>
+    <li><a href="https://irsa.ipac.caltech.edu/spherex-archive-documentation/" target="_blank" rel="noopener">Archive User Guide</a><span>data products and access</span></li>
+    <li><a href="https://irsa.ipac.caltech.edu/data/SPHEREx/docs/SPHEREx_Expsupp.pdf" target="_blank" rel="noopener">Explanatory Supplement</a><span>the full technical reference (PDF)</span></li>
+    <li><a href="http://spherex.caltech.edu/" target="_blank" rel="noopener">spherex.caltech.edu</a><span>the mission's own site</span></li>
+  </ul>
+</section>
+
+<section>
+  <h3>Good to know</h3>
+  <ul class="notes">
+    <li>Images are shown as measured: the glow of dust in the solar system (zodiacal light) is not subtracted.</li>
+    <li>Wavelength changes across every SPHEREx exposure, so the value shown is the one at your target.</li>
+    <li>Stripes, satellite trails and saturated cores of bright stars can appear; “mask bad pixels” in Controls marks the pixels the pipeline flagged.</li>
+  </ul>
+</section>
+
+<section>
+  <h3>Acknowledgement</h3>
+  <blockquote>
+    This publication makes use of data products from the Spectro-Photometer for the History of the
+    Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the
+    Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the
+    National Aeronautics and Space Administration.
+  </blockquote>
+  <p class="muted">
+    DOIs: DR1 spectral images
+    <a href="https://www.ipac.caltech.edu/doi/10.26131/IRSA678" target="_blank" rel="noopener" class="num">10.26131/IRSA678</a>,
+    QR3 <a href="https://www.ipac.caltech.edu/doi/10.26131/IRSA662" target="_blank" rel="noopener" class="num">10.26131/IRSA662</a>.
+  </p>
+</section>
+
+<section>
+  <h3>The team</h3>
+  <p>
+    Built by team <strong>CHALLENGER5</strong> (Can, Duc, Daniel, Maximilian) for the
+    <a href="https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/" target="_blank" rel="noopener">NASA Space Apps Challenge 2026, “Planet X and SPHEREx”</a>.
+    An independent project, not an official NASA product.
+  </p>
+</section>

@@ -1,4 +1,4 @@
-# Frontend: SPHEREx Blink
+# Frontend: Challenger5
 
 Documentation for the Angular frontend. It covers only the frontend; the backend (FastAPI, IRSA access, caching, image processing) is documented in [`backend/`](../backend/) and the [README](../README.md).
 
@@ -55,7 +55,7 @@ No UI component library and no image/astronomy library are installed yet. If one
 
 ```
 Browser
-  └── Angular app (SPHEREx Blink)
+  └── Angular app (Challenger5)
         ├── App shell (header + <router-outlet>)
         ├── Pages (routed, lazy-loaded)
         │     └── Home  → viewer, slider panel, object search
@@ -79,7 +79,7 @@ Current state, plus the planned folders (marked *planned*).
 ```
 frontend/
   src/
-    index.html             page shell, title "SPHEREx Blink"
+    index.html             page shell, title "Challenger5", favicon.svg
     main.ts                bootstraps the App with appConfig
     styles.scss            global styles and color tokens (dark theme)
     app/
@@ -88,17 +88,21 @@ frontend/
       app.routes.ts        '' → Home (lazy), '**' → redirect to ''
       core/
         api.config.ts      API_BASE_URL = '/api'
+        examples.ts        the five example targets (start page and search suggestions)
         models/            api.models.ts: types of the backend responses
-        services/          api.service.ts (all /api calls, picture cache), viewer-state.service.ts (shared signals)
+        services/          api.service.ts (all /api calls, picture cache, loaded/pending frame ids), viewer-state.service.ts (shared signals), history.service.ts (past searches, localStorage)
         utils/             frames.ts: pickFrame, bands, frames of a season (+ spec)
       pages/
-        home/              layout: full-screen stage, search, HUD, collapsible menu, keyboard shortcuts
+        home/              layout: full-screen stage, brand/home button, search, HUD, menu buttons and drawer with tabs, keyboard shortcuts
       components/
-        viewer/            F1: the picture, predicted-position ring, loading/progress/error states
-        search-bar/        F4: one search box for names and coordinates
+        viewer/            F1: the start page (slogan), the picture, predicted-position ring, loading/progress/error states
+        search-bar/        F4: one search box for names and coordinates, with suggestions (F10)
+        logo/              the CHALLENGER5 mark; with [spin] it is the loading indicator (F12)
+        history-panel/     F10: menu tab with all past searches
+        about-panel/       F11: menu tab explaining SPHEREx, the data and the citation
         control-panel/     F2/F3: band chips, sliders, playback, frame details, settings
         frame-plot/        SVG plot of all images of the band (season x wavelength), click to jump
-  public/                  static assets (favicon)
+  public/                  static assets (favicon.svg: same drawing as the logo component)
   proxy.conf.mjs           dev proxy for /api
   nginx.conf               prod server config
   Dockerfile               targets: deps, dev, build, prod
@@ -127,6 +131,11 @@ Status: **planned** (agreed, not built), **in progress**, **done**. New features
 | F6 | Blink / wavelength sweep playback, keyboard shortcuts | done |
 | F7 | Frame details, stretch, mask, predicted-position ring, field of view (in the menu) | done |
 | F8 | Shareable page URL (`?q=&fov=&visit=&wl=`) | done |
+| F9 | Start page with slogan; the brand (top left) is the home button | done |
+| F10 | Search suggestions (last 3 searches + 5 examples) and History tab | done |
+| F11 | "About SPHEREx" tab | done |
+| F12 | Loading indicator in the app's look (the logo with a turning orbit) | done |
+| F13 | Live "loaded" state of the dots in the frame plot | done |
 
 F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. a side drawer or overlay) that is closed or small by default, so the visualization stays the focus. The menu is built so that more controls can be added later.
 
@@ -160,6 +169,16 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 - The frontend sends the name to the backend; the **backend** finds the matching coordinates/parameters and returns them.
 - The frontend then loads the available points in time for the time slider (F2) and shows the first image in F1.
 - Handles "not found" and errors with a clear message. Optional later: suggestions while typing, recent searches.
+
+### F9-F13 (added 2026-11-15)
+
+- **F9 Start page / home:** the idle screen shows the logo, the slogan and the example targets. Clicking the brand (`ViewerState.reset()`) forgets the target, clears the page URL and returns there.
+- **F10 Suggestions and history:** while the search box has the focus it lists the last 3 searches and always the 5 examples (arrow keys + Enter, Esc closes). `HistoryService` stores successful searches (max 50, newest first, no duplicates) in `localStorage` under `challenger5.history`. The History tab lists them all; click to search again, ✕ removes one.
+- **F11 About SPHEREx:** mission facts, what the tool does, the data and links, known limits, the required acknowledgement and DOIs. Text and links are taken from `docs/spherex/`; update it when the releases in use change.
+- **Menu tabs:** the buttons at the bottom right (About SPHEREx, History, Controls) each open the drawer on their tab; the drawer stays on the right, so the stage stays on the left. A new tab = one entry in `TABS` (`home.ts`) plus a `@case` in the drawer. The buttons are a labelled stack on a wide stage and an icon row otherwise, so they never cover the picture.
+- **F12 Loader:** `<app-logo [spin]="true">` is used for the search button, the lookup/coverage panel, the first image and (small, top right of the picture) a frame that takes longer than 0.7 s.
+- **No dimming while loading:** the shown picture stays untouched until the next one has arrived; it is then swapped at once.
+- **F13 Live dots:** a dot is green when its image is loaded and pulses amber while it loads. `ViewerState.cacheOf(frame)` combines what this page loaded or is loading (`ApiService.loaded` / `pending`, immediate) with a `/coverage` refresh every 2 s while downloads run and every 8 s otherwise (paused while the browser tab is hidden).
 
 ### F5: Responsive web design
 
@@ -202,8 +221,9 @@ Rules:
 ## 6. Design and UX rules
 
 - **Visualization first:** controls are secondary and can be collapsed.
-- **Dark theme** (suits sky images). Colors are CSS variables in [`styles.scss`](src/styles.scss): `--bg`, `--fg`, `--muted`, `--border`. New colors are added there as variables, not hard-coded in components.
-- Font: system font stack (`system-ui`, `Segoe UI`, `Roboto`, ...).
+- **Deep-space theme:** near-black blue background with a CSS starfield and nebula glow (`.sky`), glass panels (`.glass`), an indigo/cyan/violet accent gradient (`--grad`). Colors are CSS variables in [`styles.scss`](src/styles.scss) (`--bg`, `--fg`, `--muted`, `--border`, `--accent*`, `--ready`, ...). New colors are added there as variables, not hard-coded in components. `--no-data` and `--masked` match the colours the backend paints into the pictures; do not restyle them.
+- Fonts (self-hosted via `@fontsource-variable/*`, registered in `angular.json`, so no request to a font CDN): **Space Grotesk** for headings and the brand (`--font-display`), **Inter** for text (`--font-body`), **JetBrains Mono** for numbers and identifiers (`--font-mono`, class `.num`).
+- Motion is small and functional (twinkling stars, loader, hover glow) and switched off with `prefers-reduced-motion`.
 - Clear loading and error states; never a blank screen without explanation.
 - Accessible: keyboard operable, visible focus, labels for all sliders and inputs.
 - Component styles stay small (build budget: warning at 4 kB, error at 8 kB per component style). Shared styles go into `styles.scss`.
@@ -249,3 +269,4 @@ The frontend starts without the backend, but all `/api` calls fail until the bac
 | 2026-11-14 | First version: architecture, tech stack, features F1-F5. |
 | 2026-11-14 | Video player removed. Sliders reduced to two: time slider (F2) and wavelength slider 1-102 (F3); RGB, band count, RA and Dec sliders removed. |
 | 2026-11-14 | Implemented F1-F8 against `docs/API.md`; F3 changed to a continuous µm slider. |
+| 2026-11-15 | Renamed to Challenger5, new logo/favicon and deep-space design. Added F9-F13: start page with slogan and home button, search suggestions and History tab, About SPHEREx tab, logo loader, live frame-plot dots. The picture is no longer dimmed while the next one loads. |
