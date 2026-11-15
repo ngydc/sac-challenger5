@@ -172,6 +172,13 @@ import { SiteFooter } from './site-footer';
               </li>
             </ul>
             <p>
+              <b>Steps (Total, 1→2, 2→3, …):</b> with three or more passes, the buttons above the
+              pictures switch every picture to one <b>step</b>: a pass minus the one before it.
+              Steps show <b>when</b> something changed, which helps with variable stars that
+              brighten and fade again (in Total, back-and-forth can cancel out). Motion between two
+              neighbouring passes is smaller, so a moving star looks weaker in a step than in Total.
+            </p>
+            <p>
               <b>Why six pictures:</b> SPHEREx has six <b>detectors</b> (light sensors), each seeing
               a different slice of <b>infrared light</b>, light our eyes cannot see. The range is
               written on each picture in µm (micrometres). Some objects, such as cold brown dwarfs

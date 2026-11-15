@@ -15,7 +15,7 @@ field of view:
         latest.json                          which products folder to serve, and whether it is complete
         .used                                touched on every read (the temp tier expires by last use)
         reproj/<reproj key>/<frame>.npz      one exposure on the common grid (image, variance, channel per pixel)
-        products/<params key>/<images key>/  meta.json, channels_<det>.npz, bundle_<id>.npz, the PNGs, spectrum/
+        products/<params key>/<images key>/  meta.json, channels_<det>.npz, bundle_<id>.npz, the PNGs (diff_<id>_s<k>.png = step k), spectrum/
 
 <tier> is "examples" for the five challenge test targets (kept) and "temp" for every other position (removed
 after TEMP_TTL_HOURS without use, least recently used first above TEMP_MAX_MB). <params key> changes when the
@@ -454,8 +454,9 @@ class AnalysisService:
         bmeta.update(extra or {})
         for name, data in pngs.items():
             (out / name).write_bytes(data)
-        if arrays:
-            _save_npz(out / f"bundle_{bundle_id}.npz", **arrays)
+        keep = {k: v for k, v in arrays.items() if not k.startswith(analysis.STEP_ARRAY_PREFIX)}  # only the PNGs are served
+        if keep:
+            _save_npz(out / f"bundle_{bundle_id}.npz", **keep)
         meta["bundles"] = [b for b in meta["bundles"] if b["id"] != bundle_id] + [bmeta]
         _write_json(out / "meta.json", meta)
 

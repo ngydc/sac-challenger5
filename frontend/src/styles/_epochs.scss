@@ -435,11 +435,40 @@
   width: 100%;
 }
 
+/* Total | 1→2 | 2→3 …: native radios (arrow keys work) drawn as the .seg buttons; wraps on narrow stages */
+.step-bar {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+
+  p {
+    margin: 0;
+  }
+}
+
+.seg.steps {
+  flex-wrap: wrap;
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0; /* a fieldset is at least as wide as its content otherwise */
+  margin: 0;
+
+  .btn {
+    flex: 1 0 auto;
+    min-width: 3.4rem;
+  }
+  .btn:has(input:focus-visible) {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+  }
+}
+
 .meta.compact {
   font-size: 0.8rem;
 }
 
 .deep-stage {
+  position: relative; /* above the stage's .sky backdrop: that one is positioned, so it would be painted over plain content */
   height: 100%;
   padding-bottom: 64px; /* the last tiles scroll clear of the Deep Analysis / Controls buttons */
   overflow-y: auto;

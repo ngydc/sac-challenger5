@@ -73,6 +73,22 @@ export interface BundleEpoch {
   files: string[];
 }
 
+/** The two epochs a difference picture compares. */
+export interface DiffPair {
+  first: { epoch: number; time: string };
+  last: { epoch: number; time: string };
+}
+
+/**
+ * One step difference: the k-th pair of NEIGHBOURING usable epochs of this bundle (epochs it cannot use are
+ * skipped, so the same step can cover different dates in different bundles). Picture: /steps/{step}.png.
+ */
+export interface DiffStep extends DiffPair {
+  step: number;
+  /** False: the pair exists but its difference could not be computed (no picture). */
+  available?: boolean;
+}
+
 export interface Bundle {
   id: string;
   kind: 'detector' | 'all';
@@ -81,13 +97,16 @@ export interface Bundle {
   note: string;
   usable_epochs: number[];
   rgb: { red: RgbChoice; green: RgbChoice; blue: RgbChoice } | null;
-  diff: {
-    first: { epoch: number; time: string };
-    last: { epoch: number; time: string };
-    clip_sigma: number;
-    definition: string;
-    colours: string;
-  } | null;
+  /** "Total": last minus first usable epoch. */
+  diff:
+    | (DiffPair & {
+        clip_sigma: number;
+        definition: string;
+        colours: string;
+      })
+    | null;
+  /** Differences of neighbouring usable epochs (backend PIPELINE_VERSION 9 on; missing in older results). */
+  diff_steps?: DiffStep[];
   wavelength_um: { min: number; max: number };
   epochs: BundleEpoch[];
   stretch: { kind: string; black: number; white: number; noise: number; unit: string } | null;

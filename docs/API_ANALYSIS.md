@@ -2,7 +2,7 @@
 
 > Team note, not an official SPHEREx source. Code: `backend/app/analysis.py` (computation), `backend/app/analysis_jobs.py` (jobs, inputs, storage), `backend/app/analysis_api.py` (endpoints). Live reference: the backend's `/docs`, group "4. Deep analysis". Replaces `docs/API_EPOCHS.md` (the first version of this feature, until 2026-11-15).
 
-For one view, the backend builds per detector one averaged picture per observing **epoch**, an **epoch RGB** (three epochs as red, green, blue: unchanged sources are white, moving or varying ones are coloured) and a **difference image** (last minus first epoch), plus a **spectrum** for every pixel.
+For one view, the backend builds per detector one averaged picture per observing **epoch**, an **epoch RGB** (three epochs as red, green, blue: unchanged sources are white, moving or varying ones are coloured) a **difference image** (last minus first epoch, "Total") and **step differences** (each epoch minus the one before it), plus a **spectrum** for every pixel.
 
 An **epoch** is the same as a **visit** of the viewer (`/api/coverage`): images grouped by gaps of more than 30 days.
 
@@ -24,7 +24,7 @@ So analysing a view the user has already looked at needs few or no downloads, an
 
 1. `GET /api/analysis?<target>&start=false` when the user opens the panel: shows a result at once if there is one (the five test targets are computed at backend start-up), starts nothing.
 2. To compute: `GET /api/analysis?<target>` (`start=true` is the default). Then poll every few seconds with `start=false` while `state` is `queued` or `running`, or `refreshing` is true. Bundles appear in `result.bundles` one detector at a time.
-3. Per bundle: `GET /api/analysis/{bundle}/diff.png`, `/rgb.png`, `/epochs/{n}.png`; a click on a pixel: `GET /api/analysis/spectrum`.
+3. Per bundle: `GET /api/analysis/{bundle}/diff.png`, `/steps/{k}.png`, `/rgb.png`, `/epochs/{n}.png`; a click on a pixel: `GET /api/analysis/spectrum`.
 
 A new position takes about 2 minutes (about 350 images, measured on a home connection), less if its frames were already loaded. At most 2 analyses run at the same time (`SPHEREX_ANALYSIS_JOBS`); others wait as `queued`.
 
@@ -46,10 +46,28 @@ A new position takes about 2 minutes (about 350 images, measured on a home conne
 
 `result`: `complete`, `images_key` (changes when new images were used: add it as `v=` to picture URLs to reload them), `grid` (`width`, `height`, `pixel_scale_arcsec`, `orientation`), `epochs[]` (`index`, `start`, `end`, `time` = median time, `n_images`, `images_per_detector`), `bundles[]`, `collections`, `searched_at`, `n_images`, `failed[]` (`frame_id`, `reason`), `failed_retryable`, `channel_table[]` (every spectral channel: `detector`, `channel`, `wavelength_um`, `wl_min_um`, `wl_max_um`), `bad_flags` (masked pixel flags).
 
-`bundles[]`: `id`, `kind` (`detector` / `all`), `detectors`, `mode` (`three_epochs`, `two_epochs`, `one_epoch`, `no_data`), `note` (one sentence on the mode), `usable_epochs`, `rgb` (`red`/`green`/`blue` → `{epoch, time, start, end}`; `null` for `no_data`), `diff` (`first`, `last`, `clip_sigma`, `relative_floor`, `definition`, `colours`; `null` with fewer than two usable epochs), `wavelength_um` (`min`, `max`), `channels[]`, `channels_excluded[]`, `epochs[]` (per epoch for this bundle: `usable`, `n_images`, `start`, `end`, `time`, `span_days`, `wavelength_at_target_um`, `saturated_images`, `files`, `background`, `noise`, …), `n`, `stretch` (`kind`, `black`, `white`, `noise`, `unit`: one stretch for every epoch of the bundle), `covered_fraction`, `gaps[]` (coverage gaps as sentences).
+`bundles[]`: `id`, `kind` (`detector` / `all`), `detectors`, `mode` (`three_epochs`, `two_epochs`, `one_epoch`, `no_data`), `note` (one sentence on the mode), `usable_epochs`, `rgb` (`red`/`green`/`blue` → `{epoch, time, start, end}`; `null` for `no_data`), `diff` (`first`, `last`, `clip_sigma`, `relative_floor`, `definition`, `colours`; `null` with fewer than two usable epochs), `diff_steps[]` (see below; empty with fewer than two usable epochs), `wavelength_um` (`min`, `max`), `channels[]`, `channels_excluded[]`, `epochs[]` (per epoch for this bundle: `usable`, `n_images`, `start`, `end`, `time`, `span_days`, `wavelength_at_target_um`, `saturated_images`, `files`, `background`, `noise`, …), `n`, `stretch` (`kind`, `black`, `white`, `noise`, `unit`: one stretch for every epoch of the bundle), `covered_fraction`, `gaps[]` (coverage gaps as sentences).
 
 ### `GET /api/analysis/{bundle}/diff.png?<target>`
 (last − first usable epoch) in units of the uncertainty: blue = brighter in the last epoch, red = fainter, white = unchanged. A moving star leaves red where it was and blue where it is now. The scale ends at ± `diff.clip_sigma`. The uncertainty includes 15 % of the pixel's own brightness (`diff.relative_floor`), because pixels of unchanged stars differ that much between epochs. 404 `no_data` with fewer than two usable epochs.
+
+### `GET /api/analysis/{bundle}/steps/{step}.png?<target>`
+One **step**: (later − earlier epoch) of the `step`-th pair of **neighbouring usable** epochs of this bundle, `step` from 0. Same computation, colours and scale (± `diff.clip_sigma`) as `/diff.png`, so steps and Total can be compared: blue = brighter in the later epoch, red = brighter in the earlier one, white = unchanged. The empirical noise scale is measured per pair. 404 `no_data` if the bundle has no such step or it is not available (the message lists the available steps).
+
+Why: for a variable star (RW Aurigae, R Draconis) "last minus first" can hide a back-and-forth; the steps show when something changed. For proper motion Total is the stronger picture (the shift is larger), so it stays the default.
+
+`bundle.diff_steps[]`: one entry per pair, `{step, first: {epoch, time}, last: {epoch, time}, available, empirical_scale}`. `first`/`last` have the form of `diff.first`/`diff.last`. A pair whose difference cannot be computed keeps its entry with `available: false`, so step numbers never shift.
+
+**Gap rule:** epochs a bundle cannot use are skipped, so the pairs differ between bundles. Example: the result has epochs 0-3 and D2 cannot use epoch 1 (`usable_epochs: [0, 2, 3]`):
+
+```json
+"diff_steps": [
+  {"step": 0, "first": {"epoch": 0, "time": "2025-05-12T…Z"}, "last": {"epoch": 2, "time": "2025-11-08T…Z"}, "available": true, "empirical_scale": 1.07},
+  {"step": 1, "first": {"epoch": 2, "time": "2025-11-08T…Z"}, "last": {"epoch": 3, "time": "2026-05-10T…Z"}, "available": true, "empirical_scale": 0.98}
+]
+```
+
+so `/api/analysis/D2/steps/0.png` is epoch 2 minus epoch 0, while for a detector with all four epochs step 0 is epoch 1 minus epoch 0. With exactly two usable epochs the only step equals Total. Since `PIPELINE_VERSION` 9; older results have no `diff_steps`.
 
 ### `GET /api/analysis/{bundle}/rgb.png?<target>`
 The epoch RGB (`bundle.rgb` says which epoch is which colour). Grey in `one_epoch` mode, 404 `no_data` in `no_data` mode.
@@ -81,7 +99,8 @@ Inputs (search results, cutouts, calibration files) are in Postgres, shared with
 analysis/<tier>/ra<deg>_dec<deg>_fov<deg>/
   latest.json                          which products folder is served, and whether it is complete
   reproj/<key>/<obs_id>-<detector>.npz one exposure on the common grid: image, variance, channel per pixel
-  products/<params key>/<images key>/  meta.json, channels_<det>.npz, bundle_<id>.npz, the PNGs, spectrum/
+  products/<params key>/<images key>/  meta.json, channels_<det>.npz, bundle_<id>.npz, the PNGs
+                                       (diff_<id>.png, diff_<id>_s<k>.png, rgb_…, frame_…), spectrum/
 ```
 
 `<tier>` is `examples` for the five test targets (never removed) and `temp` for every other position (removed after `SPHEREX_TEMP_CACHE_TTL_HOURS`, default 72, without use, and least recently used first above `SPHEREX_TEMP_CACHE_MAX_MB`, default 2000). A change of the computation gives a new `<params key>`, new images a new `<images key>`; the new folder is served once it is complete, and the old one is then removed.
