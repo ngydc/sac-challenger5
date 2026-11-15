@@ -49,13 +49,29 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sac}:${POSTGRES_PASSWORD:-sac_password}@db:5432/${POSTGRES_DB:-sac}
+      # epoch maps of positions other than the five test targets live in cache/temp and are cleaned up:
+      SPHEREX_TEMP_CACHE_TTL_HOURS: ${SPHEREX_TEMP_CACHE_TTL_HOURS:-72} # removed after this long without use
+      SPHEREX_TEMP_CACHE_MAX_MB: ${SPHEREX_TEMP_CACHE_MAX_MB:-2000} # least recently used go first above this size
     volumes:
-      - ./backend/app:/code/app # live reload; the SPHEREx cache is in the db service
+      - ./backend/app:/code/app
+      - ./backend/cache:/code/cache # persistent cache (epoch maps, cutouts, calibration files): survives restarts and rebuilds
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  # Runs once at start-up: fills cache/examples (raw cutouts, intermediate steps, all products) for the five
+  # test targets, then exits. That tree is permanent: nothing deletes it automatically.
+  # Only what is missing is computed, so a restart with a filled cache takes seconds. The backend serves the
+  # results as they appear; it does not wait for this.
+  precompute:
+    build: ./backend
+    volumes:
+      - ./backend/app:/code/app
+      - ./backend/cache:/code/cache
+    command: python -m app.precompute
+    restart: "no"
 
 volumes:
   pgdata:
