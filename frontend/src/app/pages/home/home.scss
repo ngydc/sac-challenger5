@@ -98,59 +98,6 @@
   min-width: 88px;
 }
 
-/* Single wavelength | Colour: a two-way switch in the HUD */
-.seg {
-  display: flex;
-  flex: none;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
-
-  button {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    min-height: 34px;
-    padding: 0 0.6rem;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
-    font: inherit;
-    font-size: 0.82rem;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-
-    &:hover {
-      color: var(--fg);
-    }
-    &.on {
-      background: var(--surface-3);
-      color: var(--fg);
-      box-shadow: 0 0 0 1px var(--border-strong);
-    }
-    &:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-  }
-}
-
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-
-  &.single {
-    background: #d9dcef;
-  }
-  &.colour {
-    /* the colour picture's own ramp: short wavelengths blue, long ones red */
-    background: conic-gradient(from 200deg, #0d33ff, #00bff2, #4dff4d, #ffcc00, #ff1400, #0d33ff);
-  }
-}
-
 .head-btns {
   display: flex;
   flex: none;

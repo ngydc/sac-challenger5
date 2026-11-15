@@ -12,6 +12,7 @@ import { DeepPanel } from '../../components/epochs/deep-panel';
 import { DeepStage } from '../../components/epochs/deep-stage';
 import { BundleDetail } from '../../components/epochs/bundle-detail';
 import { ColourLegend } from '../../components/colour/colour-legend';
+import { ToastHost } from '../../components/toast/toast';
 import { ColourStore } from '../../core/services/colour-store.service';
 
 type TabId = 'controls' | 'history' | 'about';
@@ -33,7 +34,7 @@ const TABS: readonly { id: TabId; label: string; icon: string }[] = [
 /** Main page: the full-screen viewer, the brand/home button, the search bar, a small HUD and the menu with its tabs. */
 @Component({
   selector: 'app-home',
-  imports: [Viewer, SearchBar, ControlPanel, HistoryPanel, AboutPanel, Logo, DeepPanel, DeepStage, BundleDetail, ColourLegend, DatePipe, DecimalPipe],
+  imports: [Viewer, SearchBar, ControlPanel, HistoryPanel, AboutPanel, Logo, DeepPanel, DeepStage, BundleDetail, ColourLegend, ToastHost, DatePipe, DecimalPipe],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })

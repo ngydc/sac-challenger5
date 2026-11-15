@@ -11,6 +11,10 @@ export type Playing = 'time' | 'wavelength' | null;
 /** single: one image at one wavelength (sliders). colour: every wavelength of a season in one colour picture. */
 export type ViewMode = 'single' | 'colour';
 
+/** Allowed field of view in degrees: the same limits as the backend (FOV_MIN, FOV_MAX in backend/app/core.py). */
+export const FOV_MIN = 0.01;
+export const FOV_MAX = 0.3;
+
 const DEBOUNCE_MS = 150;
 const BLINK_MS = 800;
 const SWEEP_MS = 350;
@@ -59,6 +63,12 @@ export class ViewerState {
   readonly stretch = signal<Stretch>('fixed');
   readonly playing = signal<Playing>(null);
   readonly mode = signal<ViewMode>('single');
+  /**
+   * The user chose the mode (the switch, the C key, or mode= in the page URL). Then it is kept for every target and
+   * never changed automatically. Otherwise each target starts in Mono and switches to Colour on its own if its colour
+   * picture is already computed (ColourStore).
+   */
+  readonly modeChosen = signal(false);
 
   readonly pick = computed(() => pickFrame(this.frames(), this.visit(), this.wavelength()));
   readonly band = computed(() => {
@@ -138,7 +148,8 @@ export class ViewerState {
         p.set('visit', String(this.visit()));
         p.set('wl', this.wavelength().toFixed(3));
       }
-      if (this.mode() === 'colour') p.set('mode', 'colour');
+      // Only a chosen mode goes into the link; otherwise the recipient gets the same automatic choice.
+      if (this.modeChosen()) p.set('mode', this.mode() === 'colour' ? 'colour' : 'mono');
       this.location.replaceState(window.location.pathname, p.toString());
     });
   }
@@ -149,7 +160,11 @@ export class ViewerState {
     const q = p.get('q') ?? (p.has('ra') && p.has('dec') ? `${p.get('ra')} ${p.get('dec')}` : null);
     const num = (k: string) => (p.has(k) && !isNaN(Number(p.get(k))) ? Number(p.get(k)) : undefined);
     this.initial = { visit: num('visit'), wl: num('wl') };
-    if (p.get('mode') === 'colour') this.mode.set('colour');
+    const mode = p.get('mode');
+    if (mode === 'colour' || mode === 'mono') {
+      this.mode.set(mode === 'colour' ? 'colour' : 'single');
+      this.modeChosen.set(true);
+    }
     if (q) this.search(q, num('fov'));
   }
 
@@ -210,7 +225,7 @@ export class ViewerState {
 
   /** New field of view: the frames are different, so the coverage is loaded again. */
   setFov(fov: number): void {
-    if (!this.resolved() || !(fov >= 0.01 && fov <= 0.3) || fov === this.fov()) return;
+    if (!this.resolved() || !(fov >= FOV_MIN && fov <= FOV_MAX) || fov === this.fov()) return;
     this.fov.set(fov);
     this.initial = { visit: this.visit(), wl: this.wavelength() };
     this.searchCtrl?.abort();
@@ -225,6 +240,9 @@ export class ViewerState {
   private async loadCoverage(ctrl: AbortController): Promise<void> {
     const t = this.target()!;
     this.stop();
+    // A new target starts in Mono unless the user chose a mode: an automatic Colour belonged to the previous target,
+    // and Colour mode would start a computation for a target that has none.
+    if (!this.modeChosen()) this.mode.set('single');
     this.phase.set('coverage');
     this.coverage.set(null);
     this.picture.set(null);
@@ -282,11 +300,20 @@ export class ViewerState {
     this.wavelength.set(f.wavelength_um);
   }
 
-  /** Switches between the single-wavelength picture and the colour picture; the season stays. */
+  /** The user's choice between the single-wavelength picture and the colour picture; the season stays. */
   setMode(m: ViewMode): void {
+    this.modeChosen.set(true);
     if (m === this.mode()) return;
     if (this.playing() === 'wavelength') this.stop(); // a wavelength sweep has no meaning in colour
     this.mode.set(m);
+  }
+
+  /** Switches to Colour on the page's own initiative (its picture is already computed). False if the user chose a mode. */
+  autoColour(): boolean {
+    if (this.modeChosen() || this.mode() === 'colour') return false;
+    if (this.playing() === 'wavelength') this.stop();
+    this.mode.set('colour');
+    return true;
   }
 
   // ---- playback ------------------------------------------------------------------------------

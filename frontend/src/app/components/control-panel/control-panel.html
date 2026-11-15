@@ -26,57 +26,91 @@
   </div>
 </section>
 
-@if (s.mode() === 'colour') {
-  <p class="muted">Colour mode shows every wavelength at once. Switch to λ to pick one.</p>
-} @else {
-  <section class="slider">
-    <div class="head">
-      <label for="wl">Wavelength</label>
-      <span class="val num">
-        {{ s.wavelength() | number: '1.3-3' }} µm
-        @if (s.band(); as b) {
-          (band {{ b.min | number: '1.2-2' }}–{{ b.max | number: '1.2-2' }})
-        }
-      </span>
-    </div>
-    @if (s.range(); as r) {
-      <input
-        id="wl"
-        type="range"
-        [min]="r[0]"
-        [max]="r[1]"
-        step="0.001"
-        [value]="s.wavelength()"
-        [style.--pct]="wlPct() + '%'"
-        (input)="s.setWavelength(num($event))"
-      />
-      <div class="steps">
-        <button type="button" class="btn step" aria-label="Previous image of this season (shorter wavelength)" [disabled]="frameIndex().i <= 0" (click)="stepFrame(-1)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>shorter
-        </button>
-        <span class="muted num">image {{ frameIndex().i + 1 }} of {{ frameIndex().n }}</span>
-        <button type="button" class="btn step" aria-label="Next image of this season (longer wavelength)" [disabled]="frameIndex().i >= frameIndex().n - 1" (click)="stepFrame(1)">
-          longer<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-        </button>
-      </div>
-    }
-    @if (s.pick(); as p) {
-      @if (!p.exact) {
-        <p class="notice">No image at this wavelength in this season; showing the nearest, {{ p.frame.wavelength_um | number: '1.3-3' }} µm.</p>
+<div class="mode">
+  <span [class.on]="!colour()">Mono</span>
+  <button
+    type="button"
+    role="switch"
+    class="switch"
+    [attr.aria-checked]="colour()"
+    aria-label="Colour picture: every wavelength in one picture (key C)"
+    title="Mono: one wavelength at a time · Colour: every wavelength in one picture (C)"
+    (click)="s.setMode(colour() ? 'single' : 'colour')"
+  >
+    <span class="knob"></span>
+  </button>
+  <span [class.on]="colour()">Colour</span>
+  @if (c.running()) {
+    <span class="computing" role="status">
+      <span class="dot busy"></span>
+      @if (c.queued()) {
+        Waiting…
+      } @else if (c.progress(); as p) {
+        Computing… <span class="num">{{ p.done }} / {{ p.total }}</span>
+      } @else {
+        Computing…
       }
+    </span>
+  } @else if (!c.colour()) {
+    <button type="button" class="btn compute" title="Compute the colour image of this position (about 2 minutes for a new position)" (click)="c.compute()">
+      @if (c.error() || c.status()?.state === 'error') {
+        <span class="dot bad"></span> Try again
+      } @else {
+        Compute colour image
+      }
+    </button>
+  }
+</div>
+
+<section class="slider" [class.off]="colour()">
+  <div class="head">
+    <label for="wl">Wavelength</label>
+    <span class="val num">
+      {{ s.wavelength() | number: '1.3-3' }} µm
+      @if (s.band(); as b) {
+        (band {{ b.min | number: '1.2-2' }}–{{ b.max | number: '1.2-2' }})
+      }
+    </span>
+  </div>
+  @if (s.range(); as r) {
+    <input
+      id="wl"
+      type="range"
+      [min]="r[0]"
+      [max]="r[1]"
+      step="0.001"
+      [value]="s.wavelength()"
+      [style.--pct]="wlPct() + '%'"
+      [disabled]="colour()"
+      (input)="s.setWavelength(num($event))"
+    />
+    <div class="steps">
+      <button type="button" class="btn step" aria-label="Previous image of this season (shorter wavelength)" [disabled]="colour() || frameIndex().i <= 0" (click)="stepFrame(-1)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>shorter
+      </button>
+      <span class="muted num">image {{ frameIndex().i + 1 }} of {{ frameIndex().n }}</span>
+      <button type="button" class="btn step" aria-label="Next image of this season (longer wavelength)" [disabled]="colour() || frameIndex().i >= frameIndex().n - 1" (click)="stepFrame(1)">
+        longer<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+      </button>
+    </div>
+  }
+  @if (s.pick(); as p) {
+    @if (!p.exact && !colour()) {
+      <p class="notice">No image at this wavelength in this season; showing the nearest, {{ p.frame.wavelength_um | number: '1.3-3' }} µm.</p>
     }
-  </section>
-}
+  }
+  @if (colour()) {
+    <p class="hint muted">Colour shows every wavelength at once. Switch to Mono to pick one.</p>
+  }
+</section>
 
 <div class="play">
   <button type="button" class="btn" [class.active]="s.playing() === 'time'" (click)="s.toggle('time')">
     {{ s.playing() === 'time' ? '❚❚ stop' : '▶ blink through time' }}
   </button>
-  @if (s.mode() !== 'colour') {
-    <button type="button" class="btn" [class.active]="s.playing() === 'wavelength'" (click)="s.toggle('wavelength')">
-      {{ s.playing() === 'wavelength' ? '❚❚ stop' : '▶ sweep wavelength' }}
-    </button>
-  }
+  <button type="button" class="btn" [class.active]="s.playing() === 'wavelength'" [disabled]="colour()" (click)="s.toggle('wavelength')">
+    {{ s.playing() === 'wavelength' ? '❚❚ stop' : '▶ sweep wavelength' }}
+  </button>
 </div>
 
 @if (s.picture(); as p) {
@@ -105,13 +139,21 @@
     field of view
     <input
       type="number"
-      min="0.01"
-      max="0.3"
+      [min]="fovMin"
+      [max]="fovMax"
       step="0.01"
       [value]="s.fov()"
-      (change)="s.setFov(num($event))"
+      [class.invalid]="fovError()"
+      [attr.aria-invalid]="!!fovError()"
+      [attr.aria-describedby]="fovError() ? 'fov-error' : null"
+      [title]="'Allowed: ' + fovMin.toFixed(2) + '° to ' + fovMax.toFixed(2) + '°'"
+      (input)="checkFov($event)"
+      (change)="applyFov($event)"
     />°
   </label>
+  @if (fovError(); as err) {
+    <p id="fov-error" class="field-error" role="alert">{{ err }}</p>
+  }
 </div>
 
 <app-frame-plot />
@@ -119,5 +161,5 @@
 <p class="legend">
   <span class="sw masked"></span> masked pixel · <span class="sw nodata"></span> no data ·
   <span class="sw ring"></span> where proper motion predicts the target ·
-  keys: ← → season, ↑ ↓ next image, space blink, M menu
+  keys: ← → season, ↑ ↓ next image, space blink, C mono/colour, M menu
 </p>

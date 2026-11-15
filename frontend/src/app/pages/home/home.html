@@ -28,16 +28,6 @@
           {{ s.playing() === 'time' ? '❚❚' : '▶' }}<span class="lbl">blink</span>
         </button>
         <button type="button" class="btn icon" aria-label="Next season" (click)="s.stepVisit(1)" [disabled]="s.visit() >= s.visits().length - 1">›</button>
-        <div class="seg" role="group" aria-label="Picture type">
-          <button type="button" [class.on]="s.mode() === 'single'" [attr.aria-pressed]="s.mode() === 'single'"
-            title="One wavelength at a time (C)" (click)="s.setMode('single')">
-            <i class="dot single" aria-hidden="true"></i><span>λ</span>
-          </button>
-          <button type="button" [class.on]="s.mode() === 'colour'" [attr.aria-pressed]="s.mode() === 'colour'"
-            title="Every wavelength in one colour picture (C)" (click)="s.setMode('colour')">
-            <i class="dot colour" aria-hidden="true"></i><span class="lbl">Colour</span>
-          </button>
-        </div>
         <div class="info" aria-live="polite">
           @if (s.mode() === 'colour') {
             <strong>All wavelengths</strong>
@@ -175,3 +165,4 @@
 </div>
 
 <app-bundle-detail />
+<app-toast />
