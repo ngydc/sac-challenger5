@@ -8,6 +8,8 @@ import { bandsOf, framesOfVisit, pickFrame } from '../utils/frames';
 export type Stretch = 'fixed' | 'frame';
 export type Phase = 'idle' | 'resolving' | 'coverage' | 'ready' | 'failed';
 export type Playing = 'time' | 'wavelength' | null;
+/** single: one image at one wavelength (sliders). colour: every wavelength of a season in one colour picture. */
+export type ViewMode = 'single' | 'colour';
 
 const DEBOUNCE_MS = 150;
 const BLINK_MS = 800;
@@ -56,6 +58,7 @@ export class ViewerState {
   readonly showRing = signal(true);
   readonly stretch = signal<Stretch>('fixed');
   readonly playing = signal<Playing>(null);
+  readonly mode = signal<ViewMode>('single');
 
   readonly pick = computed(() => pickFrame(this.frames(), this.visit(), this.wavelength()));
   readonly band = computed(() => {
@@ -86,7 +89,8 @@ export class ViewerState {
       const pick = this.pick();
       const t = this.target();
       const opts = { mask: this.mask(), stretch: this.stretch() };
-      if (this.phase() !== 'ready' || !t) return;
+      // In colour mode the single-wavelength picture is hidden: nothing is loaded until the user switches back.
+      if (this.phase() !== 'ready' || !t || this.mode() === 'colour') return;
       clearTimeout(this.debounce);
       untracked(() => {
         if (!pick) {
@@ -134,16 +138,18 @@ export class ViewerState {
         p.set('visit', String(this.visit()));
         p.set('wl', this.wavelength().toFixed(3));
       }
+      if (this.mode() === 'colour') p.set('mode', 'colour');
       this.location.replaceState(window.location.pathname, p.toString());
     });
   }
 
-  /** Reads ?q= (or ?ra=&dec=), ?fov=, ?visit=, ?wl= from the page URL and starts the search. */
+  /** Reads ?q= (or ?ra=&dec=), ?fov=, ?visit=, ?wl=, ?mode= from the page URL and starts the search. */
   initFromUrl(): void {
     const p = new URLSearchParams(window.location.search);
     const q = p.get('q') ?? (p.has('ra') && p.has('dec') ? `${p.get('ra')} ${p.get('dec')}` : null);
     const num = (k: string) => (p.has(k) && !isNaN(Number(p.get(k))) ? Number(p.get(k)) : undefined);
     this.initial = { visit: num('visit'), wl: num('wl') };
+    if (p.get('mode') === 'colour') this.mode.set('colour');
     if (q) this.search(q, num('fov'));
   }
 
@@ -274,6 +280,13 @@ export class ViewerState {
   jumpTo(f: Frame): void {
     this.visit.set(f.visit);
     this.wavelength.set(f.wavelength_um);
+  }
+
+  /** Switches between the single-wavelength picture and the colour picture; the season stays. */
+  setMode(m: ViewMode): void {
+    if (m === this.mode()) return;
+    if (this.playing() === 'wavelength') this.stop(); // a wavelength sweep has no meaning in colour
+    this.mode.set(m);
   }
 
   // ---- playback ------------------------------------------------------------------------------
