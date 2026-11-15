@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { EpochsStore } from './epochs-store.service';
-import { AnalysisStatus, Bundle } from '../models/epochs.models';
+import { AnalysisStatusService } from './analysis-status.service';
+import { AnalysisStatus, Bundle, Position } from '../models/epochs.models';
 
 const ref = (epoch: number) => ({ epoch, time: '2026-01-01T00:00:00Z' });
 const bundle = (id: string, kind: 'detector' | 'all', steps: number): Bundle =>
@@ -13,12 +14,16 @@ const bundle = (id: string, kind: 'detector' | 'all', steps: number): Bundle =>
 const status = (bundles: Bundle[]) =>
   ({ state: 'ready', refreshing: false, result: { images_key: 'k', bundles } }) as unknown as AnalysisStatus;
 
+const position: Position = { ra: 10, dec: 20, fov: 0.08, pmra: null, pmdec: null, pm_epoch: null };
+
 describe('EpochsStore step choice', () => {
   beforeEach(() => TestBed.resetTestingModule());
 
   it('counts the steps of the shown grouping and falls back to Total when a step is out of reach', () => {
     const s = TestBed.inject(EpochsStore);
-    s.status.set(status([bundle('D1', 'detector', 3), bundle('D2', 'detector', 1), bundle('all', 'all', 2)]));
+    const shared = TestBed.inject(AnalysisStatusService);
+    s.position.set(position);
+    shared.set(position, status([bundle('D1', 'detector', 3), bundle('D2', 'detector', 1), bundle('all', 'all', 2)]));
     expect(s.stepCount()).toBe(3);
     s.diffStep.set(2);
     TestBed.tick();
@@ -30,7 +35,7 @@ describe('EpochsStore step choice', () => {
     expect(s.diffStep()).toBeNull();
 
     s.diffStep.set(1);
-    s.status.set(status([bundle('all', 'all', 1)])); // one step only: the buttons are hidden
+    shared.set(position, status([bundle('all', 'all', 1)])); // one step only: the buttons are hidden
     TestBed.tick();
     expect(s.showSteps()).toBe(false);
     expect(s.diffStep()).toBeNull();

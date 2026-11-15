@@ -1,13 +1,12 @@
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { EpochsApi } from './epochs-api.service';
+import { AnalysisStatusService } from './analysis-status.service';
 import { ViewerState } from './viewer-state.service';
 import { friendly } from './epochs-store.service';
 import { targetQuery } from './api.service';
 import { AnalysisStatus, ColourEpoch } from '../models/epochs.models';
 import { Target } from '../models/api.models';
 
-const POLL_MS = 3000;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const busy = (s: AnalysisStatus | null) => !!s && (s.state === 'queued' || s.state === 'running');
 
 /**
@@ -16,15 +15,23 @@ const busy = (s: AnalysisStatus | null) => !!s && (s.state === 'queued' || s.sta
  *
  * Switching the viewer to colour is the user's request for these pictures: if the position has no analysis yet, it is
  * started here (a new position takes about 2 minutes; the five test targets are computed at backend start-up).
+ * The state and its polling belong to AnalysisStatusService, shared with the Deep Analysis panel.
  */
 @Injectable({ providedIn: 'root' })
 export class ColourStore {
   private readonly api = inject(EpochsApi);
+  private readonly analysis = inject(AnalysisStatusService);
   private readonly viewer = inject(ViewerState);
 
-  readonly status = signal<AnalysisStatus | null>(null);
+  /** The shared state of the viewer's target; null while this store's own start request is still in flight. */
+  readonly status = computed<AnalysisStatus | null>(() => {
+    const t = this.viewer.target();
+    const s = t ? this.analysis.status(t)() : null;
+    return this.starting() && !busy(s) ? null : s;
+  });
   readonly error = signal<string | null>(null);
 
+  private readonly starting = signal(false);
   private generation = 0;
   private key = '';
   private readonly preloaded = new Set<string>();
@@ -89,23 +96,18 @@ export class ColourStore {
 
   private async load(t: Target): Promise<void> {
     const key = targetQuery(t);
-    if (key === this.key && (this.colour() || this.running())) return;
+    if (key === this.key && (this.starting() || this.colour() || this.running())) return;
     const gen = ++this.generation;
     this.key = key;
-    this.status.set(null);
     this.error.set(null);
+    this.starting.set(true);
     try {
-      let s = await this.api.start(t);
-      // Poll while it is computed; the colour pictures come last, after every detector.
-      while (gen === this.generation) {
-        this.status.set(s);
-        if (!busy(s) || s.result?.colour) break;
-        await sleep(POLL_MS);
-        if (gen !== this.generation) return;
-        s = await this.api.status(t);
-      }
+      // The shared service polls while it is computed; the colour pictures come last, after every detector.
+      await this.analysis.start(t);
     } catch (e) {
       if (gen === this.generation) this.error.set(friendly(e));
+    } finally {
+      if (gen === this.generation) this.starting.set(false);
     }
   }
 }
