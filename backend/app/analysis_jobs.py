@@ -274,8 +274,8 @@ class AnalysisService:
                 ci = table.get((b["id"], c + 1), {})
                 out.append({"detector": b["id"], "channel": c + 1, "wavelength_um": ci.get("wavelength_um"),
                             "wl_min_um": ci.get("wl_min_um"), "wl_max_um": ci.get("wl_max_um"),
-                            "epochs": [{"epoch": e, "value": analysis._num(I[e, c]),
-                                        "sigma": analysis._num(np.sqrt(V[e, c])) if np.isfinite(V[e, c]) else None,
+                            "epochs": [{"epoch": e, "value": analysis.json_number(I[e, c]),
+                                        "sigma": analysis.json_number(np.sqrt(V[e, c])) if np.isfinite(V[e, c]) else None,
                                         "n": int(N[e, c])} for e in range(I.shape[0])]})
         result = {"x": x, "y": y, "unit": unit,
                   "value_definition": "IMAGE - ZODI, minus each exposure's sky level (median over the darkest pixels of the field)",
@@ -410,15 +410,7 @@ class AnalysisService:
             I_all, V_all, N_all = (np.concatenate([cubes[k][i] for k in dets], axis=1) for i in range(3))
             self._store_bundle(out, meta, "all", "all", I_all, V_all, N_all, all_info, epochs, all_exposures)
             job.stage = "all detectors: colour pictures"
-            cmeta, _, pngs = analysis.colour_composite(I_all, V_all, N_all, all_info, epochs)
-            for ce in cmeta["epochs"]:  # predicted target position at the epoch's median time, as the viewer's X-Target-X/Y
-                if ce.get("time"):
-                    tx, ty = grid.world_to_pixel(spec.at(Time(ce["time"]).mjd))
-                    ce["target_xy"] = [analysis._num(tx, 2), analysis._num(ty, 2)]
-            for name, data in pngs.items():
-                (out / name).write_bytes(data)
-            meta["colour"] = cmeta
-            _write_json(out / "meta.json", meta)
+            self._store_colour(out, meta, spec, grid, I_all, V_all, N_all, all_info, epochs)
             del I_all, V_all, N_all
         meta["complete"] = True
         meta["computed_at"] = _iso_unix(time.time())
@@ -480,6 +472,17 @@ class AnalysisService:
         if keep:
             _save_npz(out / f"bundle_{bundle_id}.npz", **keep)
         meta["bundles"] = [b for b in meta["bundles"] if b["id"] != bundle_id] + [bmeta]
+        _write_json(out / "meta.json", meta)
+
+    def _store_colour(self, out: Path, meta: dict, spec: TargetSpec, grid, I, V, N, chan_info, epochs) -> None:
+        cmeta, _, pngs = analysis.colour_composite(I, V, N, chan_info, epochs)
+        for ce in cmeta["epochs"]:  # predicted target position at the epoch's median time, as the viewer's X-Target-X/Y
+            if ce.get("time"):
+                tx, ty = grid.world_to_pixel(spec.at(Time(ce["time"]).mjd))
+                ce["target_xy"] = [analysis.json_number(tx, 2), analysis.json_number(ty, 2)]
+        for name, data in pngs.items():
+            (out / name).write_bytes(data)
+        meta["colour"] = cmeta
         _write_json(out / "meta.json", meta)
 
     # -- housekeeping ----------------------------------------------------------------------------

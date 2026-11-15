@@ -105,7 +105,7 @@ def epochmap_params() -> dict:
                        COLOUR_BALANCE_PERCENTILE, COLOUR_CHROMA_SIGMA, COLOUR_MASK_RGB]}
 
 
-def _num(x, digits: int = 6):
+def json_number(x, digits: int = 6):
     """A float for JSON: None instead of NaN/inf."""
     x = float(x)
     return round(x, digits) if np.isfinite(x) else None
@@ -161,8 +161,8 @@ def channel_table(rows: list[dict], detector: str, nchan: int) -> list[dict]:
     """One entry per channel of a detector: detector, channel (1-based), wavelength_um, wl_min_um, wl_max_um."""
     by = {(int(r["DETECTOR"]), int(r["SUBCHAN"])): r for r in rows}
     n = int(detector.lstrip("D"))
-    return [{"detector": detector, "channel": c, "wavelength_um": _num(by[(n, c)]["WAVELENGTH"], 4),
-             "wl_min_um": _num(by[(n, c)]["WL_MIN"], 4), "wl_max_um": _num(by[(n, c)]["WL_MAX"], 4)}
+    return [{"detector": detector, "channel": c, "wavelength_um": json_number(by[(n, c)]["WAVELENGTH"], 4),
+             "wl_min_um": json_number(by[(n, c)]["WL_MIN"], 4), "wl_max_um": json_number(by[(n, c)]["WL_MAX"], 4)}
             for c in range(1, nchan + 1)]
 
 
@@ -231,10 +231,10 @@ def reproject_cutout(hdul: fits.HDUList, record: spherex.ImageRecord, spec: Targ
     bg, _ = clipped_stats(out_img[valid])
     meta = {
         "frame_id": frame_id(record), "file": record.access_url.rsplit("/", 1)[-1], "detector": record.detector,
-        "collection": record.collection, "mjd": record.t_mid_mjd, "wavelength_um": _num(wl), "bandwidth_um": _num(bw),
+        "collection": record.collection, "mjd": record.t_mid_mjd, "wavelength_um": json_number(wl), "bandwidth_um": json_number(bw),
         "flags_near_target": near, "saturated": SATURATION_FLAG in near, "version": str(hdul[0].header.get("VERSION", "")),
-        "bunit": str(hdr.get("BUNIT", "")), "background": _num(bg), "valid_fraction": _num(valid.mean(), 4),
-        "median_variance": _num(np.median(out_var[valid])) if valid.any() else None,
+        "bunit": str(hdr.get("BUNIT", "")), "background": json_number(bg), "valid_fraction": json_number(valid.mean(), 4),
+        "median_variance": json_number(np.median(out_var[valid])) if valid.any() else None,
         "flagged_pixels": flagged, "cutout_pixels": int(flags.size),
     }
     return {"img": out_img.astype(np.float32), "var": out_var.astype(np.float32), "chan": chan, "meta": meta}
@@ -387,10 +387,10 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
             "epoch_start": epochs[e]["start"] if e < len(epochs) else None,  # of the whole epoch (all detectors)
             "epoch_end": epochs[e]["end"] if e < len(epochs) else None,
             "start": iso_time(t[0]) if t else None, "end": iso_time(t[-1]) if t else None,
-            "time": iso_time(float(np.median(t))) if t else None, "span_days": _num(t[-1] - t[0], 2) if t else None,
+            "time": iso_time(float(np.median(t))) if t else None, "span_days": json_number(t[-1] - t[0], 2) if t else None,
             "channels_covered": [chan_label(c) for c in range(C) if covered[e, c]],
             "channels_missing": [chan_label(c) for c in range(C) if not covered[e, c]],
-            "wavelength_at_target_um": {"min": _num(min(wl), 4), "max": _num(max(wl), 4)} if wl else None,
+            "wavelength_at_target_um": {"min": json_number(min(wl), 4), "max": json_number(max(wl), 4)} if wl else None,
             "saturated_images": sum(1 for x in exps if x["saturated"]),
             "files": sorted(x["file"] for x in exps),
         })
@@ -437,7 +437,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
         bg, sig = clipped_stats(B[e][sky])
         if np.isfinite(bg):
             B[e] -= bg
-        ep_meta[e]["background"], ep_meta[e]["noise"] = _num(bg), _num(sig)
+        ep_meta[e]["background"], ep_meta[e]["noise"] = json_number(bg), json_number(sig)
         sigmas.append(sig)
     sigma = float(np.nanmax(sigmas)) if np.any(np.isfinite(sigmas)) else float("nan")
 
@@ -472,7 +472,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
                                           f"The uncertainty includes {100 * DIFF_RELATIVE_FLOOR:.0f} % of the pixel's brightness "
                                           "(unchanged stars differ that much between epochs)",
                             "relative_floor": DIFF_RELATIVE_FLOOR,
-                            "empirical_scale": _num(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
+                            "empirical_scale": json_number(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
                             "colours": "blue = brighter in the last epoch, red = fainter (brighter in the first), white = unchanged"}
 
     # steps: each pair of NEIGHBOURING usable epochs (an unusable epoch in between is skipped), same colour scale.
@@ -481,7 +481,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     for k, (a, b) in enumerate(zip(usable, usable[1:])):
         z, scale = pair_difference(B, BV, sky, a, b)
         step = {"step": k, "first": ref(a), "last": ref(b), "available": z is not None,
-                "empirical_scale": _num(scale, 4) if z is not None else None}
+                "empirical_scale": json_number(scale, 4) if z is not None else None}
         if z is not None:
             arrays[f"{STEP_ARRAY_PREFIX}{k}"] = z  # for tests and scripts; not stored (see analysis_jobs._store_bundle)
             pngs[f"diff_{bundle_id}_s{k}.png"] = _png(diff_rgba(z, valid & np.isfinite(z)))
@@ -490,15 +490,15 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     used = [c for c in range(C) if common[c].any()]
     meta["channels"] = [chan_info[c] for c in used]
     meta["channels_excluded"] = [chan_label(c) for c in range(C) if c not in used]
-    meta["wavelength_um"] = ({"min": _num(min(chan_info[c]["wl_min_um"] for c in used), 4),
-                              "max": _num(max(chan_info[c]["wl_max_um"] for c in used), 4)} if used else None)
-    meta["stretch"] = {"kind": "asinh", "black": 0.0, "white": _num(hi), "noise": _num(sigma),
+    meta["wavelength_um"] = ({"min": json_number(min(chan_info[c]["wl_min_um"] for c in used), 4),
+                              "max": json_number(max(chan_info[c]["wl_max_um"] for c in used), 4)} if used else None)
+    meta["stretch"] = {"kind": "asinh", "black": 0.0, "white": json_number(hi), "noise": json_number(sigma),
                        "unit": next((x["bunit"] for x in exposures if x.get("bunit")), None)}
-    meta["n"] = {"per_epoch": {str(e): {"min": int(BN[e][valid].min()), "median": _num(np.median(BN[e][valid]), 1),
+    meta["n"] = {"per_epoch": {str(e): {"min": int(BN[e][valid].min()), "median": json_number(np.median(BN[e][valid]), 1),
                                         "max": int(BN[e][valid].max())} for e in usable if valid.any()},
-                 "channels_per_pixel": {"min": int(K[valid].min()), "median": _num(np.median(K[valid]), 1),
+                 "channels_per_pixel": {"min": int(K[valid].min()), "median": json_number(np.median(K[valid]), 1),
                                         "max": int(K[valid].max())} if valid.any() else None}
-    meta["covered_fraction"] = _num(valid.mean(), 4)
+    meta["covered_fraction"] = json_number(valid.mean(), 4)
     meta["gaps"] = _gaps(meta, float(valid.mean()))
     arrays.update({"image": B, "variance": BV, "n": BN, "channels_per_pixel": K.astype(np.uint8), "sky": sky})
     return meta, arrays, pngs
@@ -599,7 +599,7 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
             comp[e] = np.where(got > 0, num / got, np.nan).astype(np.float32)
         comp[e][:, nodata[e] | bad] = np.nan
 
-    meta: dict = {"spikes_rejected": spikes, "palette": [{"detector": c["detector"], "channel": c["channel"], "wavelength_um": _num(wl[i], 4),
+    meta: dict = {"spikes_rejected": spikes, "palette": [{"detector": c["detector"], "channel": c["channel"], "wavelength_um": json_number(wl[i], 4),
                                "wl_min_um": c.get("wl_min_um"), "wl_max_um": c.get("wl_max_um"), "colour": _hex(ramp[i])}
                               for i, c in enumerate(chan_info)],
                   "mask_colour": _hex(np.array(COLOUR_MASK_RGB) / 255), "usable_epochs": usable, "epochs": []}
@@ -611,8 +611,8 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
         valid = ~nodata[e]
         return {"index": e, "usable": e in usable, "start": ep.get("start"), "end": ep.get("end"), "time": ep.get("time"),
                 "channels_covered": [bool(x) for x in covered[e]], "n_channels": int(covered[e].sum()),
-                "masked_fraction": _num(masked[e][valid].mean(), 4) if e in usable and valid.any() else None,
-                "covered_fraction": _num(valid.mean(), 4) if e in usable else None}
+                "masked_fraction": json_number(masked[e][valid].mean(), 4) if e in usable and valid.any() else None,
+                "covered_fraction": json_number(valid.mean(), 4) if e in usable else None}
 
     if not usable:
         meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": None, "stretch": None,
@@ -673,8 +673,8 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
         pngs[f"colour_e{e}.png"] = _png(out)
     arrays["colour"] = comp
 
-    meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": [_num(g, 4) for g in gains],
-                 "stretch": {"kind": "asinh", "black": 0.0, "white": _num(white), "noise": _num(sigma)},
+    meta.update({"epochs": [epoch_meta(e) for e in range(E)], "white_balance": [json_number(g, 4) for g in gains],
+                 "stretch": {"kind": "asinh", "black": 0.0, "white": json_number(white), "noise": json_number(sigma)},
                  "note": "Every wavelength of one season in one picture: short wavelengths blue, long ones red, "
                          "balanced so that typical stars are white. One brightness scale for every season. "
                          "Grey pixels are masked (saturated or flagged in some wavelengths); transparent = no data."})
@@ -724,7 +724,7 @@ def average_detector(exposures: list[dict], load: Callable[[str], tuple[np.ndarr
     for x in usable_x:
         v = arrs[x["frame_id"]][0][sky]
         v = v[np.isfinite(v)]
-        x["sky_level"] = _num(np.median(v)) if v.size >= max(20, 0.3 * sky.sum()) else None
+        x["sky_level"] = json_number(np.median(v)) if v.size >= max(20, 0.3 * sky.sum()) else None
         if x["sky_level"] is None:
             dropped.append({"frame_id": x["frame_id"], "reason": "too few sky pixels to measure the background"})
     for e in range(n_epochs):
