@@ -2,6 +2,7 @@ import { Component, ElementRef, computed, effect, inject, viewChild } from '@ang
 import { EpochsApi } from '../../core/services/epochs-api.service';
 import { EpochsStore } from '../../core/services/epochs-store.service';
 import { bundleTitle, fmtDate, fmtRange, fmtUm } from '../../core/utils/format';
+import { diffPair, missingText, stepLabel } from '../../core/utils/diff-steps';
 import { SkyImage } from './sky-image';
 import { EpochLegend } from './epoch-legend';
 import { SpectrumPanel } from './spectrum-panel';
@@ -24,6 +25,9 @@ import { SpectrumPanel } from './spectrum-panel';
             <div>
               <h2 id="detail-title">
                 {{ title() }} <span class="muted">· {{ wl() }}</span>
+                @if (s.diffStep() !== null) {
+                  <span class="muted">· step {{ label() }}</span>
+                }
               </h2>
             </div>
             <button type="button" class="btn icon" aria-label="Close" (click)="dlg.close()">
@@ -48,14 +52,23 @@ import { SpectrumPanel } from './spectrum-panel';
                 </p>
               } @else {
                 <div class="tile-none hatch big">
-                  <p>A difference needs at least two usable epochs. {{ b.note }}</p>
+                  @if (s.diffStep() === null) {
+                    <p>A difference needs at least two usable epochs. {{ b.note }}</p>
+                  } @else {
+                    <p>{{ missing() }}</p>
+                  }
                 </div>
               }
-              <app-epoch-legend [bundle]="b" />
+              <app-epoch-legend [bundle]="b" [step]="s.diffStep()" />
               <p class="hint">
-                A search aid, not a measurement: it shows where something may have changed. Blue =
-                brighter in the latest epoch, red = brighter in the first, white = unchanged. A
-                moving object leaves red where it was and blue where it went.
+                A search aid, not a measurement: it shows where something may have changed.
+                @if (s.diffStep() === null) {
+                  Blue = brighter in the latest epoch, red = brighter in the first,
+                } @else {
+                  This step compares one pass with the one before it. Blue = brighter in the later
+                  pass, red = brighter in the earlier one,
+                }
+                white = unchanged. A moving object leaves red where it was and blue where it went.
               </p>
             </div>
 
@@ -157,7 +170,13 @@ export class BundleDetail {
     const b = this.s.detailBundle();
     const p = this.s.position();
     if (!b || !p) return null;
-    return b.diff ? this.api.diffUrl(p, b.id, this.s.version()) : null;
+    const step = this.s.diffStep();
+    return diffPair(b, step) ? this.api.diffUrl(p, b.id, this.s.version(), step) : null;
+  });
+  protected readonly label = computed(() => stepLabel(this.s.diffStep()));
+  protected readonly missing = computed(() => {
+    const b = this.s.detailBundle();
+    return b ? missingText(b, this.s.diffStep()) : '';
   });
 
   constructor() {

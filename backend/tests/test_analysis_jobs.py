@@ -158,6 +158,43 @@ def test_analysis_uses_the_shared_store_and_serves_the_pictures(setup):
     assert c.get("/api/analysis/spectrum", params={**Q, "x": 99, "y": 0}).json()["error"]["code"] == "bad_pixel"
 
 
+def png_pixel(resp, x: int, y: int) -> np.ndarray:
+    """RGBA of grid pixel (x, y), y counted from the south edge (PNG row 0 is the north edge)."""
+    from PIL import Image
+
+    return np.array(Image.open(io.BytesIO(resp.content)).convert("RGBA"))[H - 1 - y, x]
+
+
+def test_step_pictures_show_a_brightness_change_back_and_forth(setup, monkeypatch):
+    svc, jobs, c = setup
+
+    def blink(hdul, rec, spec, channel_map):  # the star is bright, faint, bright again in the three epochs
+        out = fake_reproject(hdul, rec, spec, channel_map)
+        epoch = int(rec.obs_id[1])
+        out["img"] = (out["img"] - star(200.0 if epoch == 2 else 100.0) + star([100.0, 40.0, 100.0][epoch])).astype(np.float32)
+        return out
+
+    monkeypatch.setattr(analysis, "reproject_cutout", blink)
+    c.get("/api/analysis", params=Q)
+    b = next(b for b in wait_ready(c)["result"]["bundles"] if b["id"] == "D1")
+    assert [(s["step"], s["first"]["epoch"], s["last"]["epoch"], s["available"]) for s in b["diff_steps"]] == \
+           [(0, 0, 1, True), (1, 1, 2, True)]
+
+    total, s0 = c.get("/api/analysis/D1/diff.png", params=Q), c.get("/api/analysis/D1/steps/0.png", params=Q)
+    assert s0.status_code == 200 and s0.headers["content-type"] == "image/png" and s0.headers["etag"]
+    assert s0.content != total.content
+    assert min(png_pixel(total, 10, 6)[:3]) > 200  # last minus first: nearly white at the star
+    red = png_pixel(s0, 10, 6)
+    assert red[0] > red[2] + 50  # step 0: brighter in the earlier epoch = red
+    blue = png_pixel(c.get("/api/analysis/D1/steps/1.png", params=Q), 10, 6)
+    assert blue[2] > blue[0] + 50
+    assert c.get("/api/analysis/all/steps/1.png", params=Q).status_code == 200
+    missing = c.get("/api/analysis/D1/steps/2.png", params=Q)
+    assert missing.status_code == 404 and missing.json()["error"]["code"] == "no_data"
+    assert "[0, 1]" in missing.json()["error"]["message"]
+    assert c.get("/api/analysis/D1/steps/-1.png", params=Q).status_code == 422
+
+
 def test_a_finished_analysis_is_not_redone_and_survives_a_restart(setup, tmp_path):
     svc, jobs, c = setup
     c.get("/api/analysis", params=Q)
@@ -245,7 +282,8 @@ def test_the_api_takes_the_viewers_target_parameters():
     assert params == {"ra", "dec", "fov", "pmra", "pmdec", "pm_epoch", "start"}
     paths = {p for p in app.openapi()["paths"] if p.startswith("/api/analysis")}
     assert paths == {"/api/analysis", "/api/analysis/spectrum", "/api/analysis/{bundle}/diff.png",
-                     "/api/analysis/{bundle}/rgb.png", "/api/analysis/{bundle}/epochs/{epoch}.png"}
+                     "/api/analysis/{bundle}/rgb.png", "/api/analysis/{bundle}/epochs/{epoch}.png",
+                     "/api/analysis/{bundle}/steps/{step}.png"}
     for gone in ("/api/config", "/api/epochs", "/api/compute", "/api/rgb", "/api/diff", "/api/frame", "/api/spectrum"):
         assert gone not in app.openapi()["paths"]
 

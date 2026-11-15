@@ -53,7 +53,7 @@ DIFF_RELATIVE_FLOOR = 0.15  # the difference's uncertainty includes this fractio
 STRETCH_HI_PERCENTILE = 99.7
 SKY_FRACTION = 0.1  # the darkest 10 % of the field count as sky (see `dark_sky`)
 REPROJ_VERSION = 1  # bump when `reproject_cutout` changes: cached reprojections are then redone
-PIPELINE_VERSION = 8  # bump when anything after the reprojection changes: products are then redone
+PIPELINE_VERSION = 9  # 9: step differences. Bump when anything after the reprojection changes: products are then redone
 
 # Flags that make a pixel unusable here, by NAME (bit numbers come from each file's FLAGS header).
 # Chosen from Table 16 of the Explanatory Supplement: everything described as unusable, erroneous, saturated
@@ -316,13 +316,42 @@ def diff_rgba(z: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
+STEP_ARRAY_PREFIX = "diff_s"  # make_bundle's arrays "diff_s0", "diff_s1", ...: the step differences
+
+
+def pair_difference(B: np.ndarray, BV: np.ndarray, sky: np.ndarray, a: int, b: int) -> tuple[np.ndarray | None, float]:
+    """(epoch b - epoch a) / uncertainty, for two usable epochs a < b of a bundle. B, BV: (E, H, W) background-
+    subtracted bundle images and their variances; sky: the bundle's source-free pixels. Returns (z as float32, the
+    empirical scale), or (None, scale) when the noise cannot be measured.
+
+    The uncertainty has two parts:
+     - the propagated variance, times an empirical factor s^2 that makes the pixel-to-pixel scatter of source-free
+       pixels 1 (this replaces an exact variance propagation through the reprojection). It is measured per pair on
+       the difference minus its 5x5 median, so that a smooth change (the halo of a variable star that fills the
+       field, as around R Draconis) is not mistaken for noise;
+     - DIFF_RELATIVE_FLOOR times the pixel's brightness (see the setting)."""
+    from scipy.ndimage import median_filter
+
+    delta, dv = B[b] - B[a], BV[b] + BV[a]
+    z0 = delta / np.sqrt(dv)
+    smooth = median_filter(np.where(np.isfinite(z0), z0, 0.0), size=5, mode="nearest")
+    _, scale = clipped_stats((z0 - smooth)[sky])
+    med, _ = clipped_stats(delta[sky])
+    if not (np.isfinite(scale) and scale > 0 and np.isfinite(med)):
+        return None, scale
+    brightness = (np.abs(B[b]) + np.abs(B[a])) / 2
+    z = (delta - med) / np.sqrt(scale**2 * dv + (DIFF_RELATIVE_FLOOR * brightness) ** 2)
+    return z.astype(np.float32), scale
+
+
 def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: list[dict],
                 epochs: list[dict], exposures: list[dict]) -> tuple[dict, dict[str, np.ndarray], dict[str, bytes]]:
     """Bundle channels into one image per epoch and build the products.
 
     I, V, N: (E, C, H, W) per epoch and channel (step 7a). chan_info: one dict per channel (detector, channel,
     wavelengths). epochs: the request's epochs. exposures: reprojection metadata of every contributing exposure.
-    Returns (metadata, arrays to store, PNG files by name)."""
+    Returns (metadata, arrays, PNG files by name). The arrays "diff_s<k>" (step differences) are for tests and
+    scripts; the job layer does not store them, nothing reads them back."""
     E, C, H, W = I.shape
     have = N > 0
     covered = have.reshape(E, C, -1).mean(-1) >= CHANNEL_MIN_FIELD_FRACTION  # (E, C)
@@ -355,7 +384,7 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     choice = pick_rgb([Time(ep_meta[e]["time"]).mjd for e in usable])
     meta["mode"], meta["note"] = choice["mode"], MODE_NOTES[choice["mode"]]
     if not usable:
-        meta.update({"rgb": None, "diff": None, "channels": [], "wavelength_um": None, "gaps": _gaps(meta, None)})
+        meta.update({"rgb": None, "diff": None, "diff_steps": [], "channels": [], "wavelength_um": None, "gaps": _gaps(meta, None)})
         return meta, arrays, pngs
 
     # channels that EVERY usable epoch has at a pixel; the same set and the same (equal) weights in all epochs
@@ -410,35 +439,36 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     meta["rgb"] = {k: {"epoch": e, "time": ep_meta[e]["time"], "start": ep_meta[e]["start"], "end": ep_meta[e]["end"]}
                    for k, e in (("red", r), ("green", g), ("blue", b))}
 
+    def ref(e: int) -> dict:
+        return {"epoch": e, "time": ep_meta[e]["time"]}
+
+    # "Total": last minus first usable epoch (the default picture)
     meta["diff"] = None
     if len(usable) >= 2:
         first, last = usable[0], usable[-1]
-        # (last - first) / uncertainty. The uncertainty has two parts:
-        #  - the propagated variance, times an empirical factor s^2 that makes the pixel-to-pixel scatter of
-        #    source-free pixels 1 (this replaces an exact variance propagation through the reprojection). It is
-        #    measured on the difference minus its 5x5 median, so that a smooth change (the halo of a variable
-        #    star that fills the field, as around R Draconis) is not mistaken for noise;
-        #  - DIFF_RELATIVE_FLOOR times the pixel's brightness (see the setting).
-        from scipy.ndimage import median_filter
-
-        delta, dv = B[last] - B[first], BV[last] + BV[first]
-        z0 = delta / np.sqrt(dv)
-        smooth = median_filter(np.where(np.isfinite(z0), z0, 0.0), size=5, mode="nearest")
-        _, scale = clipped_stats((z0 - smooth)[sky])
-        med, _ = clipped_stats(delta[sky])
-        if np.isfinite(scale) and scale > 0 and np.isfinite(med):
-            brightness = (np.abs(B[last]) + np.abs(B[first])) / 2
-            z = (delta - med) / np.sqrt(scale**2 * dv + (DIFF_RELATIVE_FLOOR * brightness) ** 2)
-            arrays["diff"] = z.astype(np.float32)
+        z, scale = pair_difference(B, BV, sky, first, last)
+        if z is not None:
+            arrays["diff"] = z
             pngs[f"diff_{bundle_id}.png"] = _png(diff_rgba(z, valid & np.isfinite(z)))
-            meta["diff"] = {"first": {"epoch": first, "time": ep_meta[first]["time"]},
-                            "last": {"epoch": last, "time": ep_meta[last]["time"]},
+            meta["diff"] = {"first": ref(first), "last": ref(last),
                             "definition": "(last - first) / combined uncertainty; the noise part is scaled so that the pixel-to-pixel scatter of source-free pixels is 1. "
                                           f"The uncertainty includes {100 * DIFF_RELATIVE_FLOOR:.0f} % of the pixel's brightness "
                                           "(unchanged stars differ that much between epochs)",
                             "relative_floor": DIFF_RELATIVE_FLOOR,
                             "empirical_scale": _num(scale, 4), "clip_sigma": DIFF_CLIP_SIGMA,
                             "colours": "blue = brighter in the last epoch, red = fainter (brighter in the first), white = unchanged"}
+
+    # steps: each pair of NEIGHBOURING usable epochs (an unusable epoch in between is skipped), same colour scale.
+    # Step k keeps its number even if its difference cannot be computed ("available": false).
+    meta["diff_steps"] = []
+    for k, (a, b) in enumerate(zip(usable, usable[1:])):
+        z, scale = pair_difference(B, BV, sky, a, b)
+        step = {"step": k, "first": ref(a), "last": ref(b), "available": z is not None,
+                "empirical_scale": _num(scale, 4) if z is not None else None}
+        if z is not None:
+            arrays[f"{STEP_ARRAY_PREFIX}{k}"] = z  # for tests and scripts; not stored (see analysis_jobs._store_bundle)
+            pngs[f"diff_{bundle_id}_s{k}.png"] = _png(diff_rgba(z, valid & np.isfinite(z)))
+        meta["diff_steps"].append(step)
 
     used = [c for c in range(C) if common[c].any()]
     meta["channels"] = [chan_info[c] for c in used]

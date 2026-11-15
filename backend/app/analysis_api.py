@@ -1,6 +1,6 @@
 """HTTP API of the deep analysis (epoch maps): one averaged picture per epoch and detector, the epoch RGB,
-the difference image and per-pixel spectra. Computation: app/analysis.py; jobs and storage: app/analysis_jobs.py.
-Guide: docs/API_ANALYSIS.md.
+the difference images (last minus first epoch, and each step between neighbouring epochs) and per-pixel spectra.
+Computation: app/analysis.py; jobs and storage: app/analysis_jobs.py. Guide: docs/API_ANALYSIS.md.
 
 It takes the same target parameters as the viewer (/api/coverage, /api/frames), so both look at the same view,
 share the coverage and the cutout store, and a frontend keeps one target object for everything. Pixel rows
@@ -80,6 +80,14 @@ class Diff(_Open):
     colours: str
 
 
+class DiffStep(_Open):
+    step: int = Field(description="0 = first pair. Step k compares the k-th and (k+1)-th USABLE epoch of this bundle.")
+    first: EpochRef = Field(description="The earlier epoch of the pair.")
+    last: EpochRef = Field(description="The later epoch of the pair.")
+    available: bool = Field(True, description="False if the difference of this pair could not be computed (no picture).")
+    empirical_scale: float | None = None
+
+
 class Stretch(_Open):
     kind: str
     black: float | None
@@ -97,6 +105,8 @@ class Bundle(_Open):
     usable_epochs: list[int]
     rgb: dict[str, EpochRef] | None = Field(None, description="Which epoch is red, green and blue; null for `no_data`.")
     diff: Diff | None = Field(None, description="Null with fewer than two usable epochs.")
+    diff_steps: list[DiffStep] = Field([], description="Differences of neighbouring usable epochs (`/steps/{step}.png`), "
+                                                       "same colours and scale as `diff`. Empty with fewer than two usable epochs.")
     wavelength_um: Range | None = None
     channels: list[Channel] = []
     epochs: list[BundleEpoch]
@@ -219,6 +229,22 @@ def get_diff(request: Request, bundle: str = BUNDLE, spec: TargetSpec = Depends(
     if b["diff"] is None:
         raise ApiError(404, "no_data", "a difference needs at least two usable epochs. " + b["note"])
     return _png(request, spec, f"diff_{bundle}.png")
+
+
+@router.get("/{bundle}/steps/{step}.png", response_class=Response, responses=PNG,
+            summary="Difference of one pair of neighbouring epochs (PNG)")
+def get_step(request: Request, bundle: str = BUNDLE,
+             step: int = Path(..., ge=0, description="Step index: 0 = second minus first usable epoch of this bundle."),
+             spec: TargetSpec = Depends(target_spec)) -> Response:
+    """(later - earlier usable epoch of step `step`) / uncertainty, with the colours and scale of `/diff.png`: blue =
+    brighter in the later epoch, red = brighter in the earlier one, white = unchanged. Epochs this bundle cannot use
+    are skipped, so the pairs (`bundle.diff_steps`) can differ between bundles."""
+    b = jobs.bundle(spec, bundle)
+    steps = b.get("diff_steps") or []
+    have = [s["step"] for s in steps if s.get("available", True)]
+    if step not in have:
+        raise ApiError(404, "no_data", f"bundle {bundle} has no step {step}; available steps: {have}")
+    return _png(request, spec, f"diff_{bundle}_s{step}.png")
 
 
 @router.get("/{bundle}/rgb.png", response_class=Response, responses=PNG, summary="Epoch RGB (PNG)")

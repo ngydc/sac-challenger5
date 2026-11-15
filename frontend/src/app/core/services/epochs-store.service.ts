@@ -4,6 +4,7 @@ import { ApiService } from './api.service';
 import { ViewerState } from './viewer-state.service';
 import { AnalysisStatus, Bundle, Position } from '../models/epochs.models';
 import { EXAMPLES, Example } from '../examples';
+import { StepChoice, stepsOf } from '../utils/diff-steps';
 
 export type Group = 'detector' | 'all';
 
@@ -58,6 +59,11 @@ export class EpochsStore {
   /** True once the user asked for the pictures of this position. */
   readonly showing = signal(false);
   readonly group = signal<Group>('detector');
+  /**
+   * Which difference every tile and the enlarged view show: null = "Total" (last minus first usable epoch), k =
+   * step k (the k-th pair of neighbouring usable epochs of each bundle). One choice for all tiles.
+   */
+  readonly diffStep = signal<StepChoice>(null);
   readonly explainerOpen = signal(readFlag(EXPLAINER_KEY, true));
   /** Bundle shown enlarged. */
   readonly detail = signal<string | null>(null);
@@ -82,6 +88,11 @@ export class EpochsStore {
     const kind = this.group() === 'all' ? 'all' : 'detector';
     return (this.result()?.bundles ?? []).filter((b) => b.kind === kind);
   });
+
+  /** The most steps any shown bundle has: the buttons Total, 1→2, … go up to this. */
+  readonly stepCount = computed(() => Math.max(0, ...this.bundles().map(stepsOf)));
+  /** With one step only, it would be the same picture as Total, so the step buttons are hidden. */
+  readonly showSteps = computed(() => this.stepCount() >= 2);
 
   readonly detailBundle = computed<Bundle | null>(() => {
     const id = this.detail();
@@ -116,6 +127,12 @@ export class EpochsStore {
       const open = this.open();
       if (!open || !t) return;
       untracked(() => void this.setPosition(t));
+    });
+    // Back to Total when the chosen step cannot be reached any more (other grouping, new result, buttons hidden).
+    // A step missing in a single tile keeps the choice: that tile says so instead.
+    effect(() => {
+      const step = this.diffStep();
+      if (step !== null && (!this.showSteps() || step >= this.stepCount())) this.diffStep.set(null);
     });
     effect(() => {
       const open = this.explainerOpen();
@@ -158,6 +175,7 @@ export class EpochsStore {
     const gen = ++this.generation;
     this.showing.set(false);
     this.status.set(null);
+    this.diffStep.set(null); // a new position starts with Total
     this.closeDetail();
     this.error.set(null);
     this.position.set(p);

@@ -52,8 +52,11 @@ export class EpochsApi {
   /**
    * `v` (e.g. the result's images_key) changes the URL when the analysis was recomputed, so the page loads the
    * new picture; the backend ignores it and revalidates pictures with an ETag.
+   * `step` null/undefined = "Total" (last minus first epoch, /diff.png); a number = that step (/steps/{step}.png).
+   * Step 0 is a real step, so it is checked with `== null`, never with `if (step)`.
    */
-  diffUrl(p: Position, bundle: string, v = ''): string {
-    return `${API_BASE_URL}/analysis/${encodeURIComponent(bundle)}/diff.png?${targetQuery(p, { v: v || undefined })}`;
+  diffUrl(p: Position, bundle: string, v = '', step?: number | null): string {
+    const path = step == null ? 'diff.png' : `steps/${step}.png`;
+    return `${API_BASE_URL}/analysis/${encodeURIComponent(bundle)}/${path}?${targetQuery(p, { v: v || undefined })}`;
   }
 }
