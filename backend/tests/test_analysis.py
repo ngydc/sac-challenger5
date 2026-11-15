@@ -211,3 +211,84 @@ def test_two_epochs_give_one_step_equal_to_the_total_and_one_epoch_none():
     I, V, N = cube(1, {}, np.random.default_rng(6))
     meta, arr, pngs = analysis.make_bundle("D1", "detector", I, V, N, info(), [], exposures(1))
     assert meta["diff_steps"] == [] and not any(k.startswith("diff_") for k in pngs)
+
+
+# --- colour composite ---------------------------------------------------------------------------
+def colour_case(rng):
+    """3 epochs, 10 channels (two detectors) from 0.8 to 4.8 µm on a 41x41 field: four ordinary stars (falling spectrum), one red
+    star (rising spectrum), a saturated core in epoch 0, a channel covering only the left part of the field,
+    a cosmic-ray-like spike in one channel of epoch 1, and an epoch 2 with too few channels."""
+    Hc = Wc = 41
+    Cc = 10
+    wl = np.geomspace(0.8, 4.8, Cc)
+    info8 = [{"detector": f"D{1 + c // 5}", "channel": 1 + c % 5, "wavelength_um": float(w), "wl_min_um": float(w * 0.97),
+              "wl_max_um": float(w * 1.03)} for c, w in enumerate(wl)]
+    y, x = np.mgrid[0:Hc, 0:Wc]
+
+    def blob(x0, y0, amp):
+        return amp * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / 3.0)
+
+    ordinary = wl ** -1.5 * 400  # a typical star: fainter at long wavelengths
+    red = wl ** 1.5 * 40  # brighter at long wavelengths (a cool or dusty object)
+    stars = [(8, 8, ordinary), (32, 8, ordinary), (8, 32, ordinary), (32, 32, ordinary), (20, 20, red)]
+    I = np.full((3, Cc, Hc, Wc), np.nan, np.float32)
+    N = np.zeros(I.shape, np.uint8)
+    for e in range(3):
+        for c in range(Cc):
+            if e == 2 and c >= 3:  # epoch 2: only 3 of 8 channels
+                continue
+            img = rng.normal(0, 0.05, (Hc, Wc))
+            for x0, y0, spec in stars:
+                img += blob(x0, y0, spec[c])
+            have = np.ones((Hc, Wc), bool)
+            if c == 5:
+                have[:, 30:] = False  # this channel's strip ends at column 30: a footprint edge, not a hole
+            if e == 0 and c < 5:
+                have[7:10, 7:10] = False  # saturated core of the star at (8, 8) on the short-wavelength detector
+            if e == 1 and c == Cc - 1:
+                img[5, 25] += 30  # a spike the flags missed, in the longest channel only
+            I[e, c] = np.where(have, img, np.nan)
+            N[e, c] = have
+    epochs = [{"index": e, "start": f"2025-0{e + 1}-01T00:00:00Z", "end": f"2025-0{e + 1}-20T00:00:00Z",
+               "time": f"2025-0{e + 1}-10T00:00:00Z"} for e in range(3)]
+    V = np.where(N > 0, 0.05**2, np.nan).astype(np.float32)
+    return I, V, N, info8, epochs, Hc
+
+
+def test_colour_composite_white_stars_red_star_and_masks():
+    I, V, N, info8, epochs, Hc = colour_case(np.random.default_rng(5))
+    meta, arr, pngs = analysis.colour_composite(I, V, N, info8, epochs)
+    assert meta["usable_epochs"] == [0, 1] and sorted(pngs) == ["colour_e0.png", "colour_e1.png"]
+    assert not meta["epochs"][2]["usable"] and meta["epochs"][2]["n_channels"] == 3
+    assert meta["spikes_rejected"] >= 1
+    pal = meta["palette"]
+    assert len(pal) == 10 and pal[0]["colour"].startswith("#")
+    first, last = (tuple(int(p["colour"][i:i + 2], 16) for i in (1, 3, 5)) for p in (pal[0], pal[-1]))
+    assert first[2] > first[0] and last[0] > last[2]  # shortest wavelength blue, longest red
+
+    def px(e, x, y):  # y from the south edge, as everywhere in the analysis
+        return rgba(pngs[f"colour_e{e}.png"])[Hc - 1 - y, x].astype(int)
+
+    mask = np.array(analysis.COLOUR_MASK_RGB)
+    for e in (0, 1):
+        p = px(e, 32, 32)  # an ordinary star: white (balanced), not blue
+        assert p[3] == 255 and max(p[:3]) - min(p[:3]) <= 25 and min(p[:3]) > 120, p
+        r = px(e, 20, 20)  # the red star: clearly red
+        assert r[0] > r[2] + 60, r
+        right = px(e, 35, 20)  # beyond channel 5's strip edge: an ordinary pixel, not masked
+        assert right[3] == 255 and not np.array_equal(right[:3], mask)
+    sp = px(1, 25, 5)  # the spike is gone: dark sky, not a red dot
+    assert sp[0] < 60 and abs(int(sp[0]) - int(sp[2])) < 30, sp
+    assert np.array_equal(px(0, 8, 8)[:3], mask)  # the saturated core is masked in epoch 0 ...
+    assert not np.array_equal(px(1, 8, 8)[:3], mask)  # ... but not in epoch 1
+    assert 0 < meta["epochs"][0]["masked_fraction"] < 0.05 and meta["epochs"][1]["masked_fraction"] == 0
+
+
+def test_colour_composite_no_data_is_transparent_and_too_few_channels_give_nothing():
+    I, V, N, info8, epochs, Hc = colour_case(np.random.default_rng(6))
+    I[1][:, :, :5] = np.nan  # epoch 1: the left 5 columns have no data at all
+    N[1][:, :, :5] = 0
+    meta, _, pngs = analysis.colour_composite(I, V, N, info8, epochs)
+    assert rgba(pngs["colour_e1.png"])[20, 2, 3] == 0 and rgba(pngs["colour_e0.png"])[20, 2, 3] == 255
+    meta, _, pngs = analysis.colour_composite(I[2:], V[2:], N[2:], info8, epochs[2:])
+    assert meta["usable_epochs"] == [] and pngs == {} and meta["stretch"] is None
