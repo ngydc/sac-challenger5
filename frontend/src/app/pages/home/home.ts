@@ -1,24 +1,46 @@
-import { Component, HostListener, OnInit, inject, signal } from '@angular/core';
+import { Component, HostListener, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { ViewerState } from '../../core/services/viewer-state.service';
 import { Viewer } from '../../components/viewer/viewer';
 import { SearchBar } from '../../components/search-bar/search-bar';
 import { ControlPanel } from '../../components/control-panel/control-panel';
+import { HistoryPanel } from '../../components/history-panel/history-panel';
+import { AboutPanel } from '../../components/about-panel/about-panel';
+import { Logo } from '../../components/logo/logo';
 import { EpochsStore } from '../../core/services/epochs-store.service';
 import { DeepPanel } from '../../components/epochs/deep-panel';
 import { DeepStage } from '../../components/epochs/deep-stage';
 import { BundleDetail } from '../../components/epochs/bundle-detail';
 
-/** Main page: the full-screen viewer, a floating search bar, a small HUD and the collapsible menu. */
+type TabId = 'controls' | 'history' | 'about';
+
+/**
+ * The menu's tabs, in the order of their buttons (top to bottom). The Deep Analysis button (its own drawer)
+ * follows Controls. `icon` is an SVG path (24 px grid).
+ */
+const TABS: readonly { id: TabId; label: string; icon: string }[] = [
+  {
+    id: 'controls',
+    label: 'Controls',
+    icon: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 7a2 2 0 1 0 4 0a2 2 0 1 0-4 0M8 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0',
+  },
+  { id: 'history', label: 'History', icon: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2' },
+  { id: 'about', label: 'About SPHEREx', icon: 'M12 21a9 9 0 1 0 0-18a9 9 0 0 0 0 18zM12 11v6M12 7.5v.5' },
+];
+
+/** Main page: the full-screen viewer, the brand/home button, the search bar, a small HUD and the menu with its tabs. */
 @Component({
   selector: 'app-home',
-  imports: [Viewer, SearchBar, ControlPanel, DeepPanel, DeepStage, BundleDetail, DatePipe, DecimalPipe],
+  imports: [Viewer, SearchBar, ControlPanel, HistoryPanel, AboutPanel, Logo, DeepPanel, DeepStage, BundleDetail, DatePipe, DecimalPipe],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
 export class Home implements OnInit {
   protected readonly s = inject(ViewerState);
+  protected readonly tabs = TABS;
   protected readonly menuOpen = signal(false);
+  protected readonly tab = signal<TabId>('controls');
+  protected readonly current = computed(() => TABS.find((t) => t.id === this.tab())!);
   /** Deep Analysis: its own drawer; while open, the stage shows the difference pictures. */
   protected readonly deep = inject(EpochsStore);
 
@@ -26,7 +48,22 @@ export class Home implements OnInit {
     this.s.initFromUrl();
   }
 
-  /** Only one drawer is open at a time. */
+  /** The brand button: back to the start page. */
+  protected goHome(): void {
+    this.s.reset();
+    this.deep.toggle(false);
+    if (this.tab() === 'controls') this.menuOpen.set(false);
+  }
+
+  /** Opens the menu on tab `id`; pressing the button of the open tab closes the menu. Only one drawer is open at a time. */
+  protected toggleTab(id: TabId): void {
+    if (this.menuOpen() && this.tab() === id) return this.menuOpen.set(false);
+    this.tab.set(id);
+    this.menuOpen.set(true);
+    this.deep.toggle(false);
+  }
+
+  /** M key: opens or closes the menu on its current tab. */
   protected toggleMenu(): void {
     const open = !this.menuOpen();
     this.menuOpen.set(open);

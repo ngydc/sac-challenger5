@@ -14,13 +14,15 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 68px 16px 72px;
-  background: radial-gradient(ellipse at center, #121620 0%, var(--bg) 70%);
+  /* The right padding keeps the picture clear of the menu buttons' column. */
+  padding: 72px 76px 72px 16px;
+  container: stage / size;
 }
 
 .top {
   position: absolute;
   inset: 12px 16px auto;
+  z-index: 5;
   display: flex;
   align-items: flex-start;
   gap: 1rem;
@@ -31,11 +33,37 @@
   }
 }
 
+/* The brand is the home button. */
 .brand {
-  padding-top: 0.6rem;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  height: 44px;
+  padding: 0 0.6rem 0 0.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: opacity 0.15s;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.word {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
   white-space: nowrap;
-  text-shadow: 0 1px 4px #000;
+
+  b {
+    margin-left: 0.08em;
+    font-weight: 700;
+    color: var(--accent-2);
+  }
 }
 
 .hud {
@@ -45,12 +73,9 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  max-width: calc(100% - 32px - 140px);
+  max-width: calc(100% - 32px - 60px); /* clear of the menu buttons */
   padding: 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--overlay);
-  backdrop-filter: blur(8px);
+  border-radius: 14px;
 }
 
 .info {
@@ -73,54 +98,84 @@
   min-width: 88px;
 }
 
-/* Deep Analysis sits above Controls and works the same way. */
-.toggle.deep-toggle {
-  bottom: 70px;
-}
-
 .head-btns {
   display: flex;
+  flex: none;
   gap: 0.4rem;
 }
 
-.toggle {
+/*
+ * ---- the menu buttons at the bottom right ----
+ * Always a vertical stack: icons only in the stage's right padding, with labels when the stage is wide
+ * enough for the picture to leave room beside it. Either way they never cover the picture.
+ */
+.dock {
   position: absolute;
   right: 16px;
   bottom: 14px;
-  min-height: 48px;
-  border-radius: 12px;
-  background: var(--overlay);
-  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
 
+  .btn {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+  span {
+    display: none;
+  }
   svg {
+    flex: none;
     width: 20px;
     height: 20px;
     fill: none;
     stroke: currentColor;
     stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 }
 
-/* ---- the menu: side drawer on wide screens ---- */
+@container stage (min-width: 1150px) and (min-aspect-ratio: 14 / 10) {
+  .dock .btn {
+    justify-content: flex-start;
+    width: auto;
+    padding: 0.45rem 0.9rem;
+  }
+  .dock span {
+    display: inline;
+  }
+  .hud {
+    max-width: calc(100% - 32px - 200px);
+  }
+}
+
+/* ---- the menu: side drawer on wide screens (to the right, so the stage stays on the left) ---- */
 .drawer {
   flex: none;
   width: 0;
   overflow: hidden;
   background: var(--surface);
   border-left: 1px solid var(--border);
+  box-shadow: -20px 0 50px rgb(0 0 0 / 0.4);
   transition: width 0.25s ease;
 }
 
 /* Fixed width so the content does not reflow while the drawer slides; it scrolls on its own. */
 .drawer-inner {
+  display: flex;
+  flex-direction: column;
   width: var(--drawer-w);
   height: 100%;
   padding: 0 1.1rem;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
-.open #controls,
+.open #drawer,
 .deep-open #deep {
   width: var(--drawer-w);
 }
@@ -132,21 +187,26 @@
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 1rem 0 0.75rem;
+  margin: 0 -1.1rem 1rem;
+  padding: 1rem 1.1rem 0.8rem;
+  border-bottom: 1px solid var(--border);
   background: var(--surface);
+  backdrop-filter: blur(10px);
 
   .btn {
     flex: none;
     align-self: flex-start;
   }
-
-  h2 {
-    margin: 0;
-    font-size: 1.15rem;
+  .titles {
+    min-width: 0;
   }
-  p {
-    margin: 0.2rem 0 0;
-    font-size: 0.8rem;
+  h2 {
+    margin: 0.15rem 0 0;
+    font-size: 1.3rem;
+  }
+  p:not(.kicker) {
+    margin: 0.25rem 0 0;
+    font-size: 0.78rem;
   }
   .warn {
     color: var(--warn);
@@ -154,8 +214,8 @@
 }
 
 .ack {
-  margin-top: 1.25rem;
-  padding-bottom: 1rem;
+  margin-top: auto;
+  padding: 1.5rem 0 1rem;
   font-size: 0.7rem;
   color: var(--muted);
   line-height: 1.5;
@@ -185,7 +245,7 @@
     max-height: 72dvh;
   }
 
-  .open #controls,
+  .open #drawer,
   .deep-open #deep {
     transform: none;
   }
@@ -195,18 +255,22 @@
   .stage {
     padding: 64px 8px 128px;
   }
-  .brand,
+  .word,
   .lbl,
   .fs {
     display: none;
   }
   .top {
     inset: 10px 10px auto;
+    gap: 0.4rem;
+  }
+  .brand {
+    padding: 0;
   }
   .hud {
     left: 10px;
     right: 10px;
-    bottom: 70px;
+    bottom: 68px;
     max-width: none;
   }
   .info {
@@ -215,18 +279,20 @@
   .play {
     min-width: 48px;
   }
-  .toggle {
-    left: calc(50% + 4px);
+  .dock {
+    left: 10px;
     right: 10px;
     bottom: 10px;
+    flex-direction: row;
 
-    .lbl {
+    .btn {
+      flex: 1;
+      width: auto;
+      padding: 0.45rem 0.4rem;
+      font-size: 0.85rem;
+    }
+    span {
       display: inline;
     }
-  }
-  .toggle.deep-toggle {
-    left: 10px;
-    right: calc(50% + 4px);
-    bottom: 10px;
   }
 }

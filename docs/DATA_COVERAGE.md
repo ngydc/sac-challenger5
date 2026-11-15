@@ -190,7 +190,7 @@ From `backend/`, with the virtual environment from `requirements.txt`:
 
 **What the viewer showed:** Barnard's Star is saturated in several bands. Its core pixels carry `OVERFLOW`, `SUR_ERROR`, `BLOOM` (and sometimes `TRANSIENT`), and because `TRANSIENT` is in our bad-pixel list the core is blanked, so the target looks like a hole. For a blink tool the masking policy needs a decision: show saturated pixels (with a marker) instead of hiding them.
 
-The first run downloads the six wavelength maps (about 200 MB) into `backend/cache/calib/`. Later runs reuse them. `coverage.csv` has one row per image (target, obs_id, detector, collection, time, pixel position, wavelength, bandwidth, edge distance, `access_url`). Use it to explore further.
+The scripts need the backend's cache database (`docker compose up -d db` from the repo root). The first run downloads the wavelength maps (about 33 MB per release and detector, about 200 MB per release) and every cutout into it; later runs, and the API, reuse them. `coverage.csv` has one row per image (target, obs_id, detector, collection, time, pixel position, wavelength, bandwidth, edge distance, `access_url`). Use it to explore further.
 
 ## Open questions
 

@@ -1,8 +1,7 @@
 import { Injectable } from '@angular/core';
 import { API_BASE_URL } from '../api.config';
-import { EpochsConfig, EpochsStatus, Position, Spectrum } from '../models/epochs.models';
-import { ResolveResponse } from '../models/api.models';
-import { ApiError } from './api.service';
+import { AnalysisStatus, Position, Spectrum } from '../models/epochs.models';
+import { ApiError, targetQuery } from './api.service';
 
 async function json<T>(r: Response): Promise<T> {
   if (r.ok) return r.json();
@@ -18,46 +17,46 @@ async function json<T>(r: Response): Promise<T> {
   throw new ApiError(r.status, code, message);
 }
 
-const pos = (p: Position, extra: Record<string, string | number> = {}) =>
-  new URLSearchParams(
-    Object.entries({ ra: p.ra, dec: p.dec, fov: p.fov, ...extra }).map(([k, v]) => [k, String(v)]),
-  ).toString();
-
-/** All calls of the epoch-maps API (docs/API_EPOCHS.md). Only `compute` makes the backend talk to IRSA. */
+/**
+ * All calls of the deep-analysis API (docs/API_ANALYSIS.md). They take the same target as the viewer
+ * (position, field of view and proper motion), so both look at the same view and share the backend's data.
+ */
 @Injectable({ providedIn: 'root' })
 export class EpochsApi {
-  config(): Promise<EpochsConfig> {
-    return fetch(`${API_BASE_URL}/config`).then((r) => json<EpochsConfig>(r));
+  /** State and result. Starts nothing. */
+  status(p: Position, signal?: AbortSignal): Promise<AnalysisStatus> {
+    return fetch(`${API_BASE_URL}/analysis?${targetQuery(p, { start: false })}`, {
+      signal,
+      cache: 'no-store',
+    }).then((r) => json<AnalysisStatus>(r));
   }
 
-  /** Turns "RA Dec" (sexagesimal or decimal) or a name into decimal degrees. */
-  resolve(q: string, signal?: AbortSignal): Promise<ResolveResponse> {
-    return fetch(`${API_BASE_URL}/resolve?${new URLSearchParams({ q })}`, { signal }).then((r) =>
-      json<ResolveResponse>(r),
+  /** Starts the analysis if needed (nothing happens if it is complete or already running) and reports it. */
+  start(p: Position): Promise<AnalysisStatus> {
+    return fetch(`${API_BASE_URL}/analysis?${targetQuery(p)}`, { cache: 'no-store' }).then((r) =>
+      json<AnalysisStatus>(r),
     );
   }
 
-  /** Status and metadata. Never starts a computation. */
-  status(p: Position, signal?: AbortSignal): Promise<EpochsStatus> {
-    return fetch(`${API_BASE_URL}/epochs?${pos(p)}`, { signal, cache: 'no-store' }).then((r) =>
-      json<EpochsStatus>(r),
-    );
-  }
-
-  /** Starts the computation (202). Does nothing on the backend if it is already running or cached. */
-  compute(p: Position): Promise<EpochsStatus> {
-    return fetch(`${API_BASE_URL}/compute?${pos(p)}`, { method: 'POST' }).then((r) =>
-      json<EpochsStatus>(r),
-    );
-  }
-
-  spectrum(p: Position, x: number, y: number, signal?: AbortSignal): Promise<Spectrum> {
-    return fetch(`${API_BASE_URL}/spectrum?${pos(p, { x, y })}`, { signal }).then((r) =>
+  /**
+   * Spectrum of one pixel. `yFromTop` is the picture row from the top (as clicked); the API counts rows
+   * from the bottom (south), like the viewer's X-Target-Y, so it is converted here.
+   */
+  spectrum(p: Position, x: number, yFromTop: number, height: number, signal?: AbortSignal): Promise<Spectrum> {
+    const y = height - 1 - yFromTop;
+    return fetch(`${API_BASE_URL}/analysis/spectrum?${targetQuery(p, { x, y })}`, { signal }).then((r) =>
       json<Spectrum>(r),
     );
   }
 
-  diffUrl(p: Position, bundle: string, v = ''): string {
-    return `${API_BASE_URL}/diff?${pos(p, { bundle, v })}`;
+  /**
+   * `v` (e.g. the result's images_key) changes the URL when the analysis was recomputed, so the page loads the
+   * new picture; the backend ignores it and revalidates pictures with an ETag.
+   * `step` null/undefined = "Total" (last minus first epoch, /diff.png); a number = that step (/steps/{step}.png).
+   * Step 0 is a real step, so it is checked with `== null`, never with `if (step)`.
+   */
+  diffUrl(p: Position, bundle: string, v = '', step?: number | null): string {
+    const path = step == null ? 'diff.png' : `steps/${step}.png`;
+    return `${API_BASE_URL}/analysis/${encodeURIComponent(bundle)}/${path}?${targetQuery(p, { v: v || undefined })}`;
   }
 }

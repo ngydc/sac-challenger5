@@ -4,28 +4,38 @@
 }
 
 form {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.3rem 0.3rem 0.3rem 0.8rem;
-  border: 1px solid var(--border);
+  padding: 0.3rem 0.3rem 0.3rem 0.9rem;
   border-radius: 999px;
-  background: var(--overlay);
-  backdrop-filter: blur(8px);
-  box-shadow: var(--shadow);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 
   &:focus-within {
-    border-color: var(--slider);
+    border-color: var(--primary);
   }
 }
 
-svg {
+.glyph {
   flex: none;
   width: 18px;
   height: 18px;
   fill: none;
   stroke: var(--muted);
   stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The input plus its rotating example, laid over the empty input. */
+.field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
 }
 
 input {
@@ -33,14 +43,103 @@ input {
   min-width: 0;
   border: 0;
   background: transparent;
+  text-overflow: ellipsis;
 
   &:focus-visible {
     outline: none;
   }
 }
 
+.example-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.55rem; /* the input's own padding */
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation: hint-in 0.4s ease-out;
+
+  .num-ish {
+    margin-left: 0.3em;
+    color: #b9c0e2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 .btn {
+  min-width: 68px;
   min-height: 34px;
   border-radius: 999px;
-  min-width: 64px;
+
+  /* While searching the button holds the loader, at full strength. */
+  &:not(.primary):disabled {
+    opacity: 1;
+  }
+}
+
+/* ---- suggestions: recent searches and example targets ---- */
+.suggest {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: min(70dvh, 420px);
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  background: rgb(9 12 30 / 0.94);
+  overflow-y: auto;
+  animation: drop 0.16s ease-out;
+
+  .kicker {
+    padding: 0.5rem 0.6rem 0.3rem;
+    color: var(--muted);
+  }
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 38px;
+  padding: 0.35rem 0.6rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &.marked {
+    background: var(--accent-soft);
+
+    .glyph {
+      stroke: var(--accent);
+    }
+  }
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }

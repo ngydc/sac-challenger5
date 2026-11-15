@@ -9,7 +9,7 @@ import { Component, computed, effect, input, output, signal } from '@angular/cor
   selector: 'app-sky-image',
   template: `
     <div
-      class="sky hatch"
+      class="pic hatch"
       [class.pickable]="pickable()"
       [style.aspect-ratio]="width() + ' / ' + height()"
       (click)="onClick($event)"
@@ -43,7 +43,9 @@ import { Component, computed, effect, input, output, signal } from '@angular/cor
     :host {
       display: block;
     }
-    .sky {
+    /* Not ".sky": that global class is the page's star backdrop (pointer-events: none), which would
+       swallow the click and paint stars over the no-data hatching. */
+    .pic {
       position: relative;
       width: 100%;
       overflow: hidden;

@@ -87,7 +87,8 @@ Suggested libraries from the brief: Astropy tools for data handling, and **Aladi
 
 - **Judging criteria and submission requirements** for Space Apps (deliverables, demo format, deadlines). These aren't in the challenge text we have. Check the participant guides and FAQs at spaceappschallenge.org/resources/.
 - **The official page text.** The challenge page loads its content with JavaScript, so this overview is based on the text pasted from it, not on an automated fetch. If the page is updated ("More resources may be added before the hackathon begins"), re-check it.
-- **Team roles, tech stack and architecture.** Not decided yet. See the open questions above.
+- **Team roles.** Not recorded here.
+- **Tech stack and architecture** are decided: Angular frontend, FastAPI backend with a Postgres cache, run with Docker Compose. See the [README](../README.md) for the layout and [API.md](API.md) for the endpoints and how frames, visits and the sliders work (this answers open questions 1, 3 and 7 above).
 
 ## 9. Glossary
 
@@ -102,10 +103,10 @@ Suggested libraries from the brief: Astropy tools for data handling, and **Aladi
 
 ## 10. Suggested MVP checklist
 
-- [ ] Query IRSA for SPHEREx spectral images covering an RA/Dec (SIA2 or TAP)
-- [ ] Fetch cutouts for a chosen field of view
-- [ ] Sort by observation time, normalize and stretch, render frames
+- [x] Query IRSA for SPHEREx spectral images covering an RA/Dec (SIA2 or TAP): backend, `/api/coverage`
+- [x] Fetch cutouts for a chosen field of view: backend, cached in Postgres
+- [x] Sort by observation time, normalize and stretch, render frames: backend, `/api/frames/{id}/image.png`
 - [ ] Blink/animation player in the browser with play/pause/step
-- [ ] RA/Dec entry form, plus URL query parameters
-- [ ] Verify on Barnard's Star, Epsilon Indi B, WISE 0855, RW Aur, R Dra
+- [ ] RA/Dec entry form, plus URL query parameters (the backend side, `/api/resolve`, is done)
+- [ ] Verify on Barnard's Star, Epsilon Indi B, WISE 0855, RW Aur, R Dra (data checked with the backend scripts, see [DATA_COVERAGE.md](DATA_COVERAGE.md); not yet through the web page)
 - [ ] Optional: Gaia/WISE overlays (Aladin Lite), per-array co-adds, difference images, spectra

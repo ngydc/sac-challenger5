@@ -9,13 +9,14 @@
   }
   @for (d of dots(); track d.f.id) {
     <circle
-      [class.ready]="d.f.cache === 'ready'"
+      [class.ready]="d.ready"
+      [class.busy]="d.busy"
       [attr.cx]="d.x"
       [attr.cy]="d.y"
       r="3"
       (click)="s.jumpTo(d.f)"
     >
-      <title>{{ d.label }}</title>
+      <title>{{ d.label }}{{ d.ready ? ' · loaded' : d.busy ? ' · loading' : '' }}</title>
     </circle>
   }
   @if (current(); as c) {
@@ -24,5 +25,5 @@
 </svg>
 <p class="hint">
   Each dot is one image of band {{ s.band()?.detector }} (x: season, y: wavelength in µm at the target).
-  <span class="g">Green</span> = loads instantly. Click a dot to jump to it.
+  <span class="g">Green</span> = loaded, <span class="b">pulsing</span> = loading now (updates live). Click a dot to jump to it.
 </p>

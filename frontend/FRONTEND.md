@@ -1,4 +1,4 @@
-# Frontend: SPHEREx Blink
+# Frontend: Challenger5
 
 Documentation for the Angular frontend. It covers only the frontend; the backend (FastAPI, IRSA access, caching, image processing) is documented in [`backend/`](../backend/) and the [README](../README.md).
 
@@ -55,7 +55,7 @@ No UI component library and no image/astronomy library are installed yet. If one
 
 ```
 Browser
-  └── Angular app (SPHEREx Blink)
+  └── Angular app (Challenger5)
         ├── App shell (header + <router-outlet>)
         ├── Pages (routed, lazy-loaded)
         │     └── Home  → viewer, slider panel, object search
@@ -79,7 +79,7 @@ Current state, plus the planned folders (marked *planned*).
 ```
 frontend/
   src/
-    index.html             page shell, title "SPHEREx Blink"
+    index.html             page shell, title "Challenger5", favicon.svg
     main.ts                bootstraps the App with appConfig
     styles.scss            global styles and color tokens (dark theme)
     app/
@@ -88,17 +88,21 @@ frontend/
       app.routes.ts        '' → Home (lazy), '**' → redirect to ''
       core/
         api.config.ts      API_BASE_URL = '/api'
+        examples.ts        the five example targets (start page and search suggestions)
         models/            api.models.ts: types of the backend responses
-        services/          api.service.ts (all /api calls, picture cache), viewer-state.service.ts (shared signals)
-        utils/             frames.ts: pickFrame, bands, frames of a season (+ spec)
+        services/          api.service.ts (all /api calls, picture cache, loaded/pending frame ids), viewer-state.service.ts (shared signals), history.service.ts (past searches, localStorage)
+        utils/             frames.ts: pickFrame, bands, frames of a season (+ spec); diff-steps.ts: which epoch pair a tile shows (+ spec)
       pages/
-        home/              layout: full-screen stage, search, HUD, collapsible menu, keyboard shortcuts
+        home/              layout: full-screen stage, brand/home button, search, HUD, menu buttons and drawer with tabs, keyboard shortcuts
       components/
-        viewer/            F1: the picture, predicted-position ring, loading/progress/error states
-        search-bar/        F4: one search box for names and coordinates
+        viewer/            F1: the start page (slogan), the picture, predicted-position ring, loading/progress/error states
+        search-bar/        F4: one search box for names and coordinates, with suggestions (F10)
+        logo/              the CHALLENGER5 mark; with [spin] it is the loading indicator (F12)
+        history-panel/     F10: menu tab with all past searches
+        about-panel/       F11: menu tab explaining SPHEREx, the data and the citation
         control-panel/     F2/F3: band chips, sliders, playback, frame details, settings
         frame-plot/        SVG plot of all images of the band (season x wavelength), click to jump
-  public/                  static assets (favicon)
+  public/                  static assets (favicon.svg: same drawing as the logo component)
   proxy.conf.mjs           dev proxy for /api
   nginx.conf               prod server config
   Dockerfile               targets: deps, dev, build, prod
@@ -127,7 +131,12 @@ Status: **planned** (agreed, not built), **in progress**, **done**. New features
 | F6 | Blink / wavelength sweep playback, keyboard shortcuts | done |
 | F7 | Frame details, stretch, mask, predicted-position ring, field of view (in the menu) | done |
 | F8 | Shareable page URL (`?q=&fov=&visit=&wl=`) | done |
-| F9 | Deep Analysis drawer: difference pictures per detector / all combined, status and compute on click, explanation, spectrum, metadata | done |
+| F9 | Start page with slogan; the brand (top left) is the home button | done |
+| F10 | Search suggestions (last 3 searches + 5 examples) and History tab | done |
+| F11 | "About SPHEREx" tab | done |
+| F12 | Loading indicator in the app's look (the logo's three epoch dots light up in turn) | done |
+| F13 | Live "loaded" state of the dots in the frame plot | done |
+| F14 | Deep Analysis drawer: difference pictures per detector / all combined, status and compute on click, explanation, spectrum, metadata | done |
 
 F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. a side drawer or overlay) that is closed or small by default, so the visualization stays the focus. The menu is built so that more controls can be added later.
 
@@ -149,7 +158,7 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 
 - **Changed (2026-11-14):** not 102 channel steps but one continuous axis in µm, from `coverage.wavelength_range_um` (about 0.74 to 5.0 µm), as the backend API defines it (`docs/API.md` section 1). Every SPHEREx pixel has its own wavelength, so channels are not a useful unit here.
 - The frontend picks the frame of the current season nearest to the slider value (`pickFrame`, no request). If none lies within 2 bandwidths, a notice shows the nearest wavelength.
-- Band chips D1-D6 above the sliders jump into a detector's range; their ranges and counts come from the data.
+- Arrow buttons under each slider step one season (earlier/later) or one image of the season by wavelength (shorter/longer), so nobody has to drag the slider; they stop playback first.
 
 **Notes for both sliders:**
 - Changes are sent to the backend as parameters; to avoid a request on every pixel of slider movement, requests should be debounced or sent on release.
@@ -161,6 +170,17 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 - The frontend sends the name to the backend; the **backend** finds the matching coordinates/parameters and returns them.
 - The frontend then loads the available points in time for the time slider (F2) and shows the first image in F1.
 - Handles "not found" and errors with a clear message. Optional later: suggestions while typing, recent searches.
+- While the box is empty it shows a real example input (`SEARCH_HINTS` in `core/examples.ts`: names and coordinates in all three accepted forms) that changes every 4 s. Coordinates only of the two targets that do not move: a moving star's J2000 position is outside the default field today.
+
+### F9-F13 (added 2026-11-15)
+
+- **F9 Start page / home:** the idle screen shows the logo, the slogan and the example targets. Clicking the brand (`ViewerState.reset()`) forgets the target, clears the page URL and returns there.
+- **F10 Suggestions and history:** while the search box has the focus it lists the last 3 searches and always the 5 examples (arrow keys + Enter, Esc closes). `HistoryService` stores successful searches (max 50, newest first, no duplicates) in `localStorage` under `challenger5.history`. The History tab lists them all; click to search again, ✕ removes one.
+- **F11 About SPHEREx:** mission facts, what the tool does, the data and links, known limits, the required acknowledgement and DOIs. Text and links are taken from `docs/spherex/`; update it when the releases in use change.
+- **Menu tabs:** the buttons at the bottom right, top to bottom Controls, Deep Analysis, History, About SPHEREx; each tab button opens the drawer on its tab, the drawer stays on the right, so the stage stays on the left. A new tab = one entry in `TABS` (`home.ts`) plus a `@case` in the drawer. The buttons are always a vertical stack (labelled on a wide stage, icons only in the stage's right padding otherwise), so they never cover the picture; only on phones (< 600 px) they are a row along the bottom edge.
+- **F12 Loader:** `<app-logo [spin]="true">` is used for the search button, the lookup/coverage panel, the first image and (small, top right of the picture) a frame that takes longer than 0.7 s.
+- **No dimming while loading:** the shown picture stays untouched until the next one has arrived; it is then swapped at once.
+- **F13 Live dots:** a dot is green when its image is loaded and pulses amber while it loads. `ViewerState.cacheOf(frame)` combines what this page loaded or is loading (`ApiService.loaded` / `pending`, immediate) with a `/coverage` refresh every 2 s while downloads run and every 8 s otherwise (paused while the browser tab is hidden).
 
 ### F5: Responsive web design
 
@@ -169,13 +189,15 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 - On small screens the slider menu opens as an overlay or bottom sheet instead of a side bar; controls are large enough for touch.
 - Sliders and the search bar must work with mouse, touch and keyboard.
 
-### F9: Deep Analysis (difference pictures)
+### F14: Deep Analysis (difference pictures)
 
-A second drawer on the main page, opened with the **Deep Analysis** button above **Controls** and working the same way (side drawer from 900 px, bottom sheet below; only one of the two drawers is open at a time). Built against `docs/API_EPOCHS.md` (`/api/config`, `/api/epochs`, `/api/compute`, `/api/diff`, `/api/spectrum`).
+A second drawer on the main page, opened with its own **Deep Analysis** button in the menu dock (below Controls) (side drawer from 900 px, bottom sheet below; only one of the two drawers is open at a time). Built against `docs/API_ANALYSIS.md` (`GET /api/analysis`, `/api/analysis/{bundle}/diff.png`, `/api/analysis/spectrum`), which takes the same target parameters as the slider picture.
 
-- **What it shows:** only the difference pictures (latest minus first epoch), **per detector** (default) or **all combined**. While the drawer is open, the stage shows the difference tiles instead of the slider picture and the slider HUD and keys are off. Click a tile to enlarge it with its metadata; click a pixel for its spectrum per epoch.
-- **Position:** the object searched on the main page (`GET /api/resolve` result), with the epoch maps' own field of view (`default_fov` from `/api/config`), because that is what the precomputed results use. For the five test targets this hits the precomputed cache.
-- **Only the start button computes.** Opening the drawer calls `GET /api/epochs`. A computed result (e.g. the five examples) or a computation already running is shown at once, without a button. Otherwise the drawer shows **"Start deep analysis (downloads data)"** with a notice that it takes tens of minutes; that click calls `POST /api/compute`, then the drawer polls every 4 s, shows progress and the remaining time (measured rate after 60 s, before that the documented ~20 images/min) and the stage adds each detector as it is ready.
+- **What it shows:** only the difference pictures (latest minus first epoch, "Total"), **per detector** (default) or **all combined**. While the drawer is open, the stage shows the difference tiles instead of the slider picture and the slider HUD and keys are off. Click a tile to enlarge it with its metadata; click a pixel for its spectrum per epoch.
+- **Position:** the view of the main page: the same target as the slider picture (`ViewerState.target()`: position from `GET /api/resolve`, its field of view, its proper motion). For the five test targets at their default field of view this hits the backend's precomputed results.
+- **Only the start button computes.** Opening the drawer calls `GET /api/analysis?start=false`. A computed result (e.g. the five examples) or a computation already queued or running is shown at once, without a button. Otherwise the drawer shows **"Start deep analysis (downloads data)"** with a notice that it takes about two minutes; that click calls `GET /api/analysis` (which starts it), then the drawer polls every 4 s, shows progress and the remaining time (measured rate after 60 s, before that ~3 images/s) and the stage adds each detector as it is ready. While a complete result is recomputed with new images (`refreshing`), the old pictures stay and the panel says so.
+- **Step bar (`Total | 1→2 | 2→3 | …`):** above the tiles in `deep-stage`. One choice (`EpochsStore.diffStep`, `null` = Total) switches every tile and the enlarged view (`bundle-detail`) at once; Total stays the default. A step is a pass minus the one before it (`/api/analysis/{bundle}/steps/{k}.png`, same colours and scale as Total), so a back-and-forth of a variable star becomes visible. `1→2` means each bundle's 1st to 2nd **usable** pass: a detector that misses a pass compares other dates, so every tile shows its own date pair (`epoch-legend`), and a tile with fewer steps shows a short notice instead of a picture. The bar is shown only with at least two steps (`stepCount()` = most steps of the shown bundles; with one step it would equal Total). The choice goes back to Total on a new position, and when a grouping change or a new result makes it unreachable. Built as native radio inputs in a `<fieldset>` (arrow keys work), styled like the `.seg` grouping switch; it wraps on narrow screens. Helpers: `core/utils/diff-steps.ts`; URL: `EpochsApi.diffUrl(p, bundle, v, step)` (step 0 is a step, checked with `== null`). No autoplay. The spectrum click is unchanged (it shows every epoch anyway).
+- **Spectrum clicks:** the picture row is counted from the top in the page, and converted to the API's row-from-the-bottom in `EpochsApi.spectrum`.
 - **Colours:** red = brighter in the first epoch, blue = brighter in the latest, white = unchanged (backend since `PIPELINE_VERSION` 8). A moving object shows red where it was and blue where it went. No data (transparent) is drawn hatched, never black. The frontend never rescales brightness.
 - **Explanation:** collapsible block in the drawer ("?" in the drawer head reopens it), with one sentence per test target from `core/examples.ts` (`seen`, written from the precomputed pictures; update it when they change). Acknowledgement text and release DOIs at the end of the drawer.
 - Not in the URL yet (the main page writes `?q=&fov=&visit=&wl=` itself).
@@ -215,8 +237,9 @@ Rules:
 ## 6. Design and UX rules
 
 - **Visualization first:** controls are secondary and can be collapsed.
-- **Dark theme** (suits sky images). Colors are CSS variables in [`styles.scss`](src/styles.scss): `--bg`, `--fg`, `--muted`, `--border`. New colors are added there as variables, not hard-coded in components.
-- Font: system font stack (`system-ui`, `Segoe UI`, `Roboto`, ...).
+- **Deep-space theme:** near-black blue background with a CSS starfield and a faint tint (`.sky`), glass panels (`.glass`), and one plain blue (`--primary`) for buttons, sliders and the active state: no gradients, no glows (they looked overstyled). Colors are CSS variables in [`styles.scss`](src/styles.scss) (`--bg`, `--fg`, `--muted`, `--border`, `--accent*`, `--ready`, ...). New colors are added there as variables, not hard-coded in components. `--no-data` and `--masked` match the colours the backend paints into the pictures; do not restyle them.
+- Fonts (self-hosted via `@fontsource-variable/*`, registered in `angular.json`, so no request to a font CDN): **Space Grotesk** for headings and the brand (`--font-display`), **Inter** for text (`--font-body`), **JetBrains Mono** for numbers and identifiers (`--font-mono`, class `.num`).
+- Motion is small and functional (twinkling stars, loader, rotating search hint) and switched off with `prefers-reduced-motion`.
 - Clear loading and error states; never a blank screen without explanation.
 - Accessible: keyboard operable, visible focus, labels for all sliders and inputs.
 - Component styles stay small (build budget: warning at 4 kB, error at 8 kB per component style). Shared styles go into `styles.scss`.
@@ -262,4 +285,6 @@ The frontend starts without the backend, but all `/api` calls fail until the bac
 | 2026-11-14 | First version: architecture, tech stack, features F1-F5. |
 | 2026-11-14 | Video player removed. Sliders reduced to two: time slider (F2) and wavelength slider 1-102 (F3); RGB, band count, RA and Dec sliders removed. |
 | 2026-11-14 | Implemented F1-F8 against `docs/API.md`; F3 changed to a continuous µm slider. |
-| 2026-11-15 | F9 Deep Analysis drawer (difference pictures) next to Controls; the slider viewer stays the main page. |
+| 2026-11-15 | Renamed to Challenger5, new logo/favicon and deep-space design. Added F9-F13: start page with slogan and home button, search suggestions and History tab, About SPHEREx tab, logo loader, live frame-plot dots. The picture is no longer dimmed while the next one loads. |
+| 2026-11-15 | F14 Deep Analysis drawer (difference pictures) as its own button in the menu dock; the slider viewer stays the main page. |
+| 2026-11-15 | F14: step differences (bar with Total, 1→2, 2→3, … above the tiles, also used by the enlarged view). |

@@ -1,0 +1,29 @@
+@if (history.entries().length) {
+  <div class="list-head">
+    <span class="muted">{{ history.entries().length }} {{ history.entries().length === 1 ? 'search' : 'searches' }}, newest first</span>
+    <button type="button" class="btn ghost small" (click)="history.clear()">Clear all</button>
+  </div>
+  <ul>
+    @for (e of history.entries(); track e.query) {
+      <li [class.current]="e.query === s.resolved()?.query">
+        <button type="button" class="entry" (click)="s.search(e.query)">
+          <strong>{{ e.name ?? e.query }}</strong>
+          @if (e.name && e.name !== e.query) {
+            <span class="muted typed">“{{ e.query }}”</span>
+          }
+          <span class="meta">
+            <span class="num">RA {{ e.ra | number: '1.4-4' }}° · Dec {{ e.dec | number: '1.4-4' }}°</span>
+            <span>{{ ago(e.at) }}</span>
+          </span>
+        </button>
+        <button type="button" class="btn ghost icon del" [attr.aria-label]="'Remove ' + e.query + ' from the history'" (click)="history.remove(e.query)">✕</button>
+      </li>
+    }
+  </ul>
+} @else {
+  <div class="empty">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2" /></svg>
+    <p>No searches yet.</p>
+    <p class="muted">Every object or position you look up is listed here, so you can return to it with one click. The list is kept in this browser only.</p>
+  </div>
+}

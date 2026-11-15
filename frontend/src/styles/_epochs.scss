@@ -22,17 +22,6 @@
   color: var(--warn);
 }
 
-.btn.primary {
-  border-color: transparent;
-  background: var(--slider);
-  color: #fff;
-  font-weight: 600;
-
-  &:hover:not(:disabled) {
-    background: #4a8ef8;
-  }
-}
-
 .btn.big {
   min-height: 48px;
   padding: 0.6rem 1.4rem;
@@ -79,7 +68,7 @@
   span {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, var(--slider), var(--accent));
+    background: var(--primary);
     transition: width 0.4s ease;
   }
 }
@@ -291,7 +280,7 @@
   padding: 1rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, #171b25, var(--surface));
+  background: var(--surface);
 
   > header {
     display: flex;
@@ -435,13 +424,42 @@
   width: 100%;
 }
 
+/* Total | 1→2 | 2→3 …: native radios (arrow keys work) drawn as the .seg buttons; wraps on narrow stages */
+.step-bar {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+
+  p {
+    margin: 0;
+  }
+}
+
+.seg.steps {
+  flex-wrap: wrap;
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0; /* a fieldset is at least as wide as its content otherwise */
+  margin: 0;
+
+  .btn {
+    flex: 1 0 auto;
+    min-width: 3.4rem;
+  }
+  .btn:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
 .meta.compact {
   font-size: 0.8rem;
 }
 
 .deep-stage {
+  position: relative; /* above the stage's .sky backdrop: that one is positioned, so it would be painted over plain content */
   height: 100%;
-  padding-bottom: 64px; /* the last tiles scroll clear of the Deep Analysis / Controls buttons */
+  padding-bottom: 64px; /* on phones the last tiles scroll clear of the menu buttons' row */
   overflow-y: auto;
   scrollbar-width: thin;
 
@@ -518,6 +536,13 @@ dialog.detail {
   }
 }
 
+.detail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
 .detail-pic {
   display: flex;
   flex-direction: column;
@@ -579,8 +604,8 @@ dialog.detail {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  margin-top: 0.8rem;
-  padding: 1rem 1.1rem;
+  padding: 0.9rem 1rem;
+  scroll-margin-top: 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -593,21 +618,78 @@ dialog.detail {
 .spec-head {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
 
+  .btn.icon {
+    flex: none; /* keep it square next to wrapping text */
+  }
   h3 {
     margin: 0 0 0.2rem;
     font-size: 1rem;
   }
 }
 
-.chart {
+.spec-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+/* Linear | Asinh: native radios drawn as .seg buttons */
+.seg.scale {
+  margin: 0;
+  min-width: 0;
+
+  .btn {
+    min-height: 30px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+  }
+  .btn:has(input:focus-visible) {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+  }
+  .btn.off {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.chart-box {
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chart {
+  display: block;
+  max-width: 100%;
   height: auto;
 
+  .band {
+    fill: rgb(140 155 255 / 0.035);
+
+    &.alt {
+      fill: rgb(140 155 255 / 0.085);
+    }
+  }
+  .band-label {
+    fill: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: help;
+  }
   .grid {
     stroke: var(--border);
     stroke-width: 1;
+
+    &.zero {
+      stroke: var(--border-strong);
+    }
   }
   .tick,
   .axis {
@@ -615,6 +697,15 @@ dialog.detail {
     font-size: 11px;
   }
   circle {
+    pointer-events: none;
+  }
+  .hl {
+    stroke: var(--fg);
+    stroke-width: 1.5;
+  }
+  .hit {
+    fill: transparent;
+    pointer-events: all;
     cursor: default;
   }
 }

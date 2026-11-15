@@ -1,15 +1,12 @@
+import { Target } from './api.models';
+
 /**
- * Response types of the epoch-maps API (docs/API_EPOCHS.md, backend/app/epochs_api.py, backend/app/epochs.py).
+ * Response types of the deep-analysis API (docs/API_ANALYSIS.md, backend/app/analysis_api.py).
  * Only fields the frontend reads are typed; field names are exactly the backend's.
  */
 
-export interface EpochsConfig {
-  default_fov: number;
-  fov_min: number;
-  fov_max: number;
-}
-
-export type EpochsStatusKind = 'cached' | 'not_computed' | 'running' | 'error';
+/** idle: not computed. queued: waiting for a free slot. running: being computed. ready: complete. */
+export type AnalysisState = 'idle' | 'queued' | 'running' | 'ready' | 'error';
 export type BundleMode = 'three_epochs' | 'two_epochs' | 'one_epoch' | 'no_data';
 
 export interface Progress {
@@ -19,13 +16,16 @@ export interface Progress {
   bundles_ready: string[];
 }
 
-export interface EpochsStatus {
-  status: EpochsStatusKind;
+export interface AnalysisStatus {
+  target: Target;
+  state: AnalysisState;
+  /** A complete result is being recomputed with newly found images; the old one is shown meanwhile. */
+  refreshing: boolean;
   progress: Progress | null;
   message: string | null;
-  default_fov: number;
-  target: { ra: number; dec: number; fov: number };
-  cache: string;
+  /** The five test targets: kept for good. Other positions: removed after temp_ttl_hours without use. */
+  kept: boolean;
+  temp_ttl_hours: number;
   result: EpochsResult | null;
 }
 
@@ -39,6 +39,8 @@ export interface Epoch {
 
 export interface EpochsResult {
   complete: boolean;
+  /** Identifies the set of images the result was computed from; changes when new data was added. */
+  images_key: string;
   grid: { width: number; height: number; pixel_scale_arcsec: number; orientation: string };
   epochs: Epoch[];
   bundles: Bundle[];
@@ -71,6 +73,22 @@ export interface BundleEpoch {
   files: string[];
 }
 
+/** The two epochs a difference picture compares. */
+export interface DiffPair {
+  first: { epoch: number; time: string };
+  last: { epoch: number; time: string };
+}
+
+/**
+ * One step difference: the k-th pair of NEIGHBOURING usable epochs of this bundle (epochs it cannot use are
+ * skipped, so the same step can cover different dates in different bundles). Picture: /steps/{step}.png.
+ */
+export interface DiffStep extends DiffPair {
+  step: number;
+  /** False: the pair exists but its difference could not be computed (no picture). */
+  available?: boolean;
+}
+
 export interface Bundle {
   id: string;
   kind: 'detector' | 'all';
@@ -79,13 +97,16 @@ export interface Bundle {
   note: string;
   usable_epochs: number[];
   rgb: { red: RgbChoice; green: RgbChoice; blue: RgbChoice } | null;
-  diff: {
-    first: { epoch: number; time: string };
-    last: { epoch: number; time: string };
-    clip_sigma: number;
-    definition: string;
-    colours: string;
-  } | null;
+  /** "Total": last minus first usable epoch. */
+  diff:
+    | (DiffPair & {
+        clip_sigma: number;
+        definition: string;
+        colours: string;
+      })
+    | null;
+  /** Differences of neighbouring usable epochs (backend PIPELINE_VERSION 9 on; missing in older results). */
+  diff_steps?: DiffStep[];
   wavelength_um: { min: number; max: number };
   epochs: BundleEpoch[];
   stretch: { kind: string; black: number; white: number; noise: number; unit: string } | null;
@@ -111,9 +132,5 @@ export interface Spectrum {
   channels: SpectrumChannel[];
 }
 
-/** The position the page is about: decimal degrees as the backend resolved them. */
-export interface Position {
-  ra: number;
-  dec: number;
-  fov: number;
-}
+/** The view the analysis is about: the viewer's target (position, field of view, proper motion). */
+export type Position = Target;

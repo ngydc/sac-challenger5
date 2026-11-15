@@ -1,4 +1,6 @@
-"""Copy the finished example targets of the epoch-map file cache (backend/cache/examples/) into the database.
+"""Migration: copy the raw data of the OLD epoch-map file cache (backend/cache/examples/, used until 2026-11-15)
+into the database, so it is not downloaded again. Since then the deep analysis reads its cutouts and calibration
+files from the database itself (app/analysis_jobs.py); its new results live in backend/cache/analysis/.
 
     cd backend
     python -m scripts.import_examples [path/to/cache] [--all]
@@ -7,9 +9,9 @@
                                                  from search.json (access_url) and target.json (centre, size)
                                                  exactly as app/service.py does, so /api/image.png finds them.
 - examples/<target>/cutouts/<frame_id>.outside -> cutout with status 'outside'
-- calib/<s3 key>                               -> calibration_file (only the ones not stored yet)
+- calib/<s3 key>                               -> calibration files (only the ones not stored yet)
 Only targets whose status.json says "done" are imported, unless --all is given.
-Reprojections and products (reproj/, products/) stay as files: the database has no table for them.
+The old reprojections and products are not used any more; delete backend/cache/examples/ afterwards.
 Safe to run twice.
 """
 from __future__ import annotations
@@ -19,7 +21,7 @@ import sys
 from pathlib import Path
 
 from app import db, spherex
-from app.epochs import frame_id, spec_for
+from app.core import TargetSpec, frame_id
 
 
 def main() -> None:
@@ -39,7 +41,7 @@ def main() -> None:
         if state != "done" and "--all" not in sys.argv:
             print(f"{name}: skipped (state {state!r}, not finished)")
             continue
-        spec = spec_for(info["ra"], info["dec"], info["fov"])
+        spec = TargetSpec.build(str(info["ra"]), str(info["dec"]), info["fov"], None, None, None)
         new = had = outside = missing = 0
         for raw in records:
             rec = spherex.ImageRecord(**raw)

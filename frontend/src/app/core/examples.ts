@@ -68,3 +68,24 @@ export const EXAMPLES: Example[] = [
       'in the first epoch than in the latest. A brightness change, no motion.',
   },
 ];
+
+/**
+ * Rotating hints in the empty search box: real inputs in every accepted form (name, sexagesimal with
+ * h/m/s or colons, decimal degrees), so a new user sees exactly what to type.
+ *
+ * Coordinates are only given for the two targets that do not move (RW Aurigae, R Draconis; positions from
+ * `catalogue` above). The J2000 position of Barnard's Star is about 4.5' away from where the star is now,
+ * outside the default field of view, so the moving targets appear by name only. ASCII "-" and "+" only:
+ * the backend reads coordinates with astropy (backend/app/resolver.py).
+ */
+export const SEARCH_HINTS: readonly string[] = [
+  "Barnard's Star",
+  '05h07m49.57s +30d24m05.2s',
+  'Epsilon Indi B',
+  '248.1676 66.7550',
+  'WISE 0855-0714',
+  '16:32:40.23 +66:45:17.9',
+];
+
+/** How long each hint stays (ms): long enough to read a coordinate pair. */
+export const SEARCH_HINT_MS = 4000;
