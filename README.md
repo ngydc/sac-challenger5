@@ -137,3 +137,16 @@ docs/                       documentation (below)
 All images are public SPHEREx Level 2 data from the NASA/IPAC Infrared Science Archive (IRSA): [DR1 spectral images](https://doi.org/10.26131/IRSA678) and [QR3](https://doi.org/10.26131/IRSA662).
 
 > This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration.
+
+## Use of AI
+
+We used AI (super intelligence, SI) tools to implement this project. The idea and the decisions about what to build and how it should behave came from the team and the challenge statement; the AI helped us write and change the code.
+
+- **Tool:** [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant, used in the code editor and the terminal.
+- **Code:** large parts of the backend (`backend/`) and the frontend (`frontend/`) were written or changed with the help of Claude Code, from our instructions, and then reviewed, tested and adjusted by the team. This includes the tests and the Docker setup.
+- **Documentation:** much of the technical documentation in `docs/` and this README was drafted with the same tool. The copies of the official SPHEREx documentation in `docs/spherex/` were fetched with its help; they are NASA/IPAC's text, not ours.
+- **Metadata:** commits made with AI help carry a `Co-Authored-By: Claude` line in the git history. `CLAUDE.md` holds the instructions the AI followed in this repository (for example: take every SPHEREx detail from the official documentation, never from memory).
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE). This does not cover third-party material: the SPHEREx data and the copied official documentation in `docs/spherex/` belong to NASA/IPAC, and the logos in `docs/submission/` to their owners.
