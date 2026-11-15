@@ -140,10 +140,10 @@ All images are public SPHEREx Level 2 data from the NASA/IPAC Infrared Science A
 
 ## Use of AI
 
-We used AI (super intelligence, SI) tools to implement this project. The idea and the decisions about what to build and how it should behave came from the team and the challenge statement; the AI helped us write and change the code.
+We used AI (super intelligence, SI) tools to implement this project. Idea and decisions about what to build, the architecture of our project and how it should behave came from the team; the AI was used as a tool to help us write and change the code.
 
-- **Tool:** [Claude Code](https://claude.com/claude-code), Anthropic's AI coding assistant, used in the code editor and the terminal.
-- **Code:** large parts of the backend (`backend/`) and the frontend (`frontend/`) were written or changed with the help of Claude Code, from our instructions, and then reviewed, tested and adjusted by the team. This includes the tests and the Docker setup.
+
+- **Code:** large parts of implementing the backend (`backend/`) and the frontend (`frontend/`) were written or changed with the help of Claude Code, from our instructions, and then reviewed, tested and adjusted by the team. This includes the tests and the Docker setup.
 - **Documentation:** much of the technical documentation in `docs/` and this README was drafted with the same tool. The copies of the official SPHEREx documentation in `docs/spherex/` were fetched with its help; they are NASA/IPAC's text, not ours.
 - **Metadata:** commits made with AI help carry a `Co-Authored-By: Claude` line in the git history. `CLAUDE.md` holds the instructions the AI followed in this repository (for example: take every SPHEREx detail from the official documentation, never from memory).
 
