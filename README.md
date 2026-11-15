@@ -4,6 +4,37 @@ A web tool that shows what the [SPHEREx](https://irsa.ipac.caltech.edu/Missions/
 
 Team CHALLENGER5: Can, Duc, Daniel, Maximilian.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/demo-blink-time.gif" alt="Blink player stepping through three observing seasons of Barnard's Star"></td>
+    <td width="50%"><img src="docs/img/demo-wavelength-sweep.gif" alt="Wavelength slider sweeping from 0.75 to 5.0 µm on Barnard's Star"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Blink through time:</b> 3 observing seasons at 2.86 µm</td>
+    <td align="center"><b>Wavelength sweep:</b> 0.75 to 5.0 µm, season 1</td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="46%"><img src="docs/img/demo-analysis-total-detectors.png" alt="Deep analysis: difference images of all six detectors, first to last epoch"></td>
+    <td width="27%"><img src="docs/img/demo-analysis-step-1-2.png" alt="Deep analysis: difference image from epoch 1 to 2, all detectors combined"></td>
+    <td width="27%"><img src="docs/img/demo-analysis-step-2-3.png" alt="Deep analysis: difference image from epoch 2 to 3, all detectors combined"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Deep analysis:</b> total change, all 6 detectors</td>
+    <td align="center"><b>Deep analysis:</b> step 1→2, all combined</td>
+    <td align="center"><b>Deep analysis:</b> step 2→3, all combined</td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/img/demo-analysis-spectrum.png" alt="Deep analysis: spectrum at a clicked pixel, one line per epoch" width="80%"><br>
+  <b>Deep analysis:</b> total change, all combined, with the spectrum at the clicked pixel (one line per epoch)
+</p>
+
 ## What it does
 
 - **Search** by name (`Barnard's Star`) or by coordinates (RA/Dec in degrees or sexagesimal). Names of fast-moving objects are moved to where the object is today, using its proper motion.
