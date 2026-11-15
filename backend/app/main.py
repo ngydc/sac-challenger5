@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from . import db
+from . import cache_transfer, db
 from .api import api_error_handler, router
 from .analysis_api import router as analysis_router
 from .analysis_jobs import WARM_RETRIES, jobs
@@ -21,12 +21,22 @@ log = logging.getLogger("spherex.main")
 PRECOMPUTE = os.environ.get("SPHEREX_PRECOMPUTE", "1") != "0"
 
 
+def _start_background(seed: str) -> None:
+    if seed:
+        cache_transfer.seed_if_empty(seed)  # never raises
+    if PRECOMPUTE:
+        jobs.warm(retries=WARM_RETRIES)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Warm the five test targets in the background: their coverage, the viewer's frames (prefetch) and their deep
     # analysis. Complete, current results are skipped, so a restart with a warm cache costs a few database reads.
-    if PRECOMPUTE:
-        threading.Thread(target=jobs.warm, kwargs={"retries": WARM_RETRIES}, daemon=True, name="precompute").start()
+    # SPHEREX_SEED_URL (a file or URL of an archive made by app/cache_transfer.py): loaded once, only into an empty
+    # database, before the warm-up, so a fresh install starts with data instead of downloading it from IRSA.
+    seed = os.environ.get("SPHEREX_SEED_URL", "").strip()
+    if PRECOMPUTE or seed:
+        threading.Thread(target=_start_background, args=(seed,), daemon=True, name="precompute").start()
     yield
     db.store.close()
 

@@ -1,12 +1,14 @@
 # Start:   docker compose up --build          -> http://localhost:4200 (dev, live reload)
 # Prod:    docker compose --profile prod up --build frontend-prod   -> http://localhost:8080
+# Ports are only reachable from this computer. If one is taken, set FRONTEND_PORT, PROD_PORT, BACKEND_PORT or
+# DB_PORT in a .env file (see .env.example).
 services:
   frontend:
     build:
       context: ./frontend
       target: dev
     ports:
-      - "4200:4200"
+      - "127.0.0.1:${FRONTEND_PORT:-4200}:4200"
     environment:
       API_TARGET: http://backend:8000
     volumes:
@@ -22,7 +24,7 @@ services:
       context: ./frontend
       target: prod
     ports:
-      - "8080:80"
+      - "127.0.0.1:${PROD_PORT:-8080}:80"
     depends_on:
       - backend # nginx proxies /api to it
     restart: unless-stopped
@@ -34,7 +36,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sac_password}
       POSTGRES_DB: ${POSTGRES_DB:-sac}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432" # only for tools and scripts run on the host; the backend uses the internal network
     volumes:
       - pgdata:/var/lib/postgresql/data # tables are created by the backend (backend/app/schema.sql)
     healthcheck:
@@ -42,11 +44,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped # without this the database stays down after Docker or the computer restarts
 
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sac}:${POSTGRES_PASSWORD:-sac_password}@db:5432/${POSTGRES_DB:-sac}
       # Deep analysis (epoch maps). At start-up the backend computes the five test targets in the background
@@ -56,10 +59,19 @@ services:
       SPHEREX_ANALYSIS_JOBS: ${SPHEREX_ANALYSIS_JOBS:-2} # analyses computed at the same time
       SPHEREX_TEMP_CACHE_TTL_HOURS: ${SPHEREX_TEMP_CACHE_TTL_HOURS:-72} # removed after this long without use
       SPHEREX_TEMP_CACHE_MAX_MB: ${SPHEREX_TEMP_CACHE_MAX_MB:-2000} # least recently used go first above this size
+      # Optional: file or URL of a cache snapshot (made with `python -m app.cache_transfer export`). It is loaded once,
+      # only when the database is empty, so a fresh install starts with data instead of downloading it from IRSA.
+      SPHEREX_SEED_URL: ${SPHEREX_SEED_URL:-}
     volumes:
       - ./backend/app:/code/app
       - ./backend/cache:/code/cache # deep-analysis results (files); search results, cutouts and calibration are in the db service
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck: # `docker compose ps` shows "healthy"; `docker compose up --wait` waits for it
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/docs', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
