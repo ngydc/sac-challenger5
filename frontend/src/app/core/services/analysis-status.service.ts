@@ -1,7 +1,10 @@
-import { Injectable, Signal, WritableSignal, inject, signal } from '@angular/core';
+import { Injectable, Signal, WritableSignal, computed, inject, signal } from '@angular/core';
 import { EpochsApi } from './epochs-api.service';
 import { targetQuery } from './api.service';
 import { AnalysisStatus, Position } from '../models/epochs.models';
+
+/** Measured 2026-11-15 (docs/FETCH_SPEED.md): about 3 images per second. Used until a rate has been measured. */
+const FALLBACK_IMAGES_PER_S = 3;
 
 /** How often a queued or running computation is asked for its state. */
 export const POLL_MS = 4000;
@@ -15,6 +18,10 @@ export const busy = (s: AnalysisStatus | null | undefined): boolean =>
 interface Entry {
   readonly target: Position;
   readonly status: WritableSignal<AnalysisStatus | null>;
+  /** Images processed per second, measured over the last minute or more of this computation (null until then). */
+  readonly rate: WritableSignal<number | null>;
+  readonly remainingS: Signal<number | null>;
+  samples: { t: number; done: number }[];
   polling: boolean;
   /** Requests are numbered when sent; an answer older than one already applied is dropped. */
   sent: number;
@@ -41,6 +48,11 @@ export class AnalysisStatusService {
     return this.entry(target).status.asReadonly();
   }
 
+  /** Remaining time of `target`'s running computation in seconds (null when nothing runs or the total is unknown). */
+  remainingS(target: Position): Signal<number | null> {
+    return this.entry(target).remainingS;
+  }
+
   /** Asks for the state only; rejects if the request fails. */
   check(target: Position): Promise<AnalysisStatus> {
     return this.request(target, false);
@@ -62,7 +74,14 @@ export class AnalysisStatusService {
     const key = targetQuery(target);
     let e = this.entries.get(key);
     if (!e) {
-      e = { target, status: signal<AnalysisStatus | null>(null), polling: false, sent: 0, applied: 0 };
+      const status = signal<AnalysisStatus | null>(null);
+      const rate = signal<number | null>(null);
+      const remainingS = computed(() => {
+        const pr = status()?.progress;
+        if (!busy(status()) || !pr || pr.total <= 0) return null;
+        return (pr.total - pr.done) / (rate() ?? FALLBACK_IMAGES_PER_S);
+      });
+      e = { target, status, rate, remainingS, samples: [], polling: false, sent: 0, applied: 0 };
       this.entries.set(key, e);
     }
     return e;
@@ -80,7 +99,23 @@ export class AnalysisStatusService {
     if (n < e.applied) return; // a later request was already answered: this one is out of date
     e.applied = n;
     e.status.set(s);
+    this.measureRate(e, s);
     void this.poll(e);
+  }
+
+  /** The rate is measured from the progress of every answer while the computation runs; a new run starts afresh. */
+  private measureRate(e: Entry, s: AnalysisStatus): void {
+    const pr = s.progress;
+    const last = e.samples[e.samples.length - 1];
+    if (!busy(s) || !pr || pr.total <= 0 || (last && pr.done < last.done)) {
+      e.samples = [];
+      e.rate.set(null);
+      if (!busy(s) || !pr || pr.total <= 0) return;
+    }
+    e.samples.push({ t: Date.now() / 1000, done: pr.done });
+    const first = e.samples[0];
+    const dt = e.samples[e.samples.length - 1].t - first.t;
+    if (dt >= 60 && pr.done > first.done) e.rate.set((pr.done - first.done) / dt);
   }
 
   /** One loop per target, as long as it is busy. A missed poll is retried. */

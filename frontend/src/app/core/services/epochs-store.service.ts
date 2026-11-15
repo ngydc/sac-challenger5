@@ -8,8 +8,6 @@ import { StepChoice, stepsOf } from '../utils/diff-steps';
 
 export type Group = 'detector' | 'all';
 
-/** Measured 2026-11-15 (docs/FETCH_SPEED.md): about 3 images per second. Used until a rate has been measured. */
-const FALLBACK_IMAGES_PER_S = 3;
 const EXPLAINER_KEY = 'spherex-blink.deep-explainer-open';
 
 const same = (a: Position | null, b: Position | null) =>
@@ -74,8 +72,6 @@ export class EpochsStore {
   readonly examplePositions = signal<Record<string, { ra: number; dec: number }>>({});
 
   private generation = 0;
-  private samples: { t: number; done: number }[] = [];
-  private readonly rate = signal<number | null>(null);
   private started = false;
 
   readonly result = computed(() => this.status()?.result ?? null);
@@ -114,9 +110,8 @@ export class EpochsStore {
 
   /** Remaining time of a running computation, in seconds (null while the archive is being searched). */
   readonly remainingS = computed(() => {
-    const pr = this.status()?.progress;
-    if (!pr || pr.total <= 0) return null;
-    return (pr.total - pr.done) / (this.rate() ?? FALLBACK_IMAGES_PER_S);
+    const p = this.position();
+    return p ? this.analysis.remainingS(p)() : null;
   });
 
   constructor() {
@@ -129,15 +124,11 @@ export class EpochsStore {
       if (!open || !t) return;
       untracked(() => void this.setPosition(t));
     });
-    // A computation that is running (maybe started by the colour view) is shown at once; the rate is measured on
-    // every answer while it runs.
+    // A computation that is running (maybe started by the colour view) is shown at once.
     effect(() => {
       const s = this.status();
       if (!busy(s)) return;
-      untracked(() => {
-        this.showing.set(true);
-        this.measureRate(s!);
-      });
+      untracked(() => this.showing.set(true));
     });
     // Back to Total when the chosen step cannot be reached any more (other grouping, new result, buttons hidden).
     // A step missing in a single tile keeps the choice: that tile says so instead.
@@ -185,8 +176,6 @@ export class EpochsStore {
     if (same(p, this.position()) && this.status()) return;
     const gen = ++this.generation;
     this.showing.set(false);
-    this.samples = [];
-    this.rate.set(null);
     this.diffStep.set(null); // a new position starts with Total
     this.closeDetail();
     this.error.set(null);
@@ -218,8 +207,6 @@ export class EpochsStore {
     this.starting.set(true);
     const gen = ++this.generation;
     try {
-      this.samples = [];
-      this.rate.set(null);
       await this.analysis.start(p);
       if (gen !== this.generation) return;
       this.showing.set(true);
@@ -228,16 +215,6 @@ export class EpochsStore {
     } finally {
       this.starting.set(false);
     }
-  }
-
-  private measureRate(s: AnalysisStatus): void {
-    const pr = s.progress;
-    if (!pr || pr.total <= 0) return;
-    this.samples.push({ t: Date.now() / 1000, done: pr.done });
-    const first = this.samples[0];
-    const last = this.samples[this.samples.length - 1];
-    const dt = last.t - first.t;
-    if (dt >= 60 && last.done > first.done) this.rate.set((last.done - first.done) / dt);
   }
 
   openDetail(id: string): void {

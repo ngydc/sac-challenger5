@@ -54,17 +54,28 @@
         </div>
       } @else {
         <div class="first" role="status">
-          <app-logo [size]="64" [spin]="true" />
-          @if (c.running()) {
-            <span>Combining every wavelength into colour…</span>
-            @if (c.progress() !== null) {
-              <div class="bar" role="progressbar" [attr.aria-valuenow]="c.progress()" aria-valuemin="0" aria-valuemax="100">
-                <span [style.width.%]="c.progress()"></span>
+          @if (c.queued()) {
+            <h3><span class="dot busy"></span> Waiting</h3>
+            <p class="muted small">Other analyses are being computed; this colour image starts next.</p>
+          } @else if (c.running()) {
+            <h3><span class="dot busy"></span> Colour image being created</h3>
+            @if (c.progress(); as p) {
+              <div class="bar" role="progressbar" [attr.aria-valuenow]="p.pct" aria-valuemin="0" aria-valuemax="100">
+                <span [style.width.%]="p.pct"></span>
               </div>
+              <p class="muted small">
+                {{ p.stage }} · {{ p.done }} / {{ p.total }} images
+                @if (p.eta) {
+                  · {{ p.eta }} left
+                }
+                @if (p.bundles_ready.length) {
+                  · ready: {{ p.bundles_ready.join(', ') }}
+                }
+              </p>
             }
-            <span class="muted small">{{ c.status()?.progress?.stage }} · a new position takes about 2 minutes</span>
           } @else {
-            <span>Looking for the colour picture…</span>
+            <app-logo [size]="64" [spin]="true" />
+            <span>Looking for the colour image…</span>
           }
         </div>
       }
