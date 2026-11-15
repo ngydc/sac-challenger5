@@ -73,6 +73,16 @@
   min-width: 88px;
 }
 
+/* Deep Analysis sits above Controls and works the same way. */
+.toggle.deep-toggle {
+  bottom: 70px;
+}
+
+.head-btns {
+  display: flex;
+  gap: 0.4rem;
+}
+
 .toggle {
   position: absolute;
   right: 16px;
@@ -110,7 +120,8 @@
   scrollbar-width: thin;
 }
 
-.open .drawer {
+.open #controls,
+.deep-open #deep {
   width: var(--drawer-w);
 }
 
@@ -174,7 +185,8 @@
     max-height: 72dvh;
   }
 
-  .open .drawer {
+  .open #controls,
+  .deep-open #deep {
     transform: none;
   }
 }
@@ -204,12 +216,17 @@
     min-width: 48px;
   }
   .toggle {
-    left: 10px;
+    left: calc(50% + 4px);
     right: 10px;
     bottom: 10px;
 
     .lbl {
       display: inline;
     }
+  }
+  .toggle.deep-toggle {
+    left: 10px;
+    right: calc(50% + 4px);
+    bottom: 10px;
   }
 }

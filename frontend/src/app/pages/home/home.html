@@ -1,13 +1,17 @@
-<div class="layout" [class.open]="menuOpen()">
+<div class="layout" [class.open]="menuOpen()" [class.deep-open]="deep.open()">
   <main class="stage">
-    <app-viewer />
+    @if (deep.open()) {
+      <app-deep-stage />
+    } @else {
+      <app-viewer />
+    }
 
     <header class="top">
       <span class="brand">SPHEREx Blink</span>
       <app-search-bar />
     </header>
 
-    @if (s.phase() === 'ready') {
+    @if (s.phase() === 'ready' && !deep.open()) {
       <div class="hud">
         <button type="button" class="btn icon" aria-label="Previous season" (click)="s.stepVisit(-1)" [disabled]="s.visit() === 0">‹</button>
         <button
@@ -32,11 +36,23 @@
 
     <button
       type="button"
+      class="btn toggle deep-toggle"
+      [class.active]="deep.open()"
+      aria-controls="deep"
+      [attr.aria-expanded]="deep.open()"
+      (click)="toggleDeep()"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5" /><circle cx="15" cy="12" r="5" /></svg>
+      <span class="lbl">Deep Analysis</span>
+    </button>
+
+    <button
+      type="button"
       class="btn toggle"
       [class.active]="menuOpen()"
       aria-controls="controls"
       [attr.aria-expanded]="menuOpen()"
-      (click)="menuOpen.set(!menuOpen())"
+      (click)="toggleMenu()"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
       <span class="lbl">Controls</span>
@@ -76,4 +92,25 @@
     </footer>
     </div>
   </aside>
+
+  <aside id="deep" class="drawer" [inert]="!deep.open()" aria-label="Deep Analysis">
+    <div class="drawer-inner">
+      <div class="drawer-head">
+        <div>
+          <h2>Deep Analysis</h2>
+          <p class="muted">What changed between SPHEREx's passes{{ s.resolved()?.target?.name ? ' · ' + s.resolved()?.target?.name : '' }}</p>
+        </div>
+        <div class="head-btns">
+          @if (!deep.explainerOpen() && s.resolved()) {
+            <button type="button" class="btn icon help" aria-label="How to read the difference pictures"
+              title="How to read the difference pictures" aria-controls="deep-explainer" (click)="deep.explainerOpen.set(true)">?</button>
+          }
+          <button type="button" class="btn icon" aria-label="Close Deep Analysis" (click)="deep.toggle(false)">✕</button>
+        </div>
+      </div>
+      <app-deep-panel />
+    </div>
+  </aside>
 </div>
+
+<app-bundle-detail />

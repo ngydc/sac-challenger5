@@ -87,7 +87,7 @@ def test_brightening_and_motion_are_seen():
     px = rgba(pngs["rgb_D1.png"])[H - 1 - 10, 10]
     assert px[2] > px[0]  # the last epoch is blue
     d = rgba(pngs["diff_D1.png"])[H - 1 - 10, 10]
-    assert d[0] > d[2]  # brighter = red in the difference image
+    assert d[2] > d[0]  # brighter = blue in the difference image (as the latest epoch in the RGB)
 
     I, V, N = cube(2, {}, rng, shift=[0.0, 1.0])  # the star moves one pixel to +x between two epochs
     meta, arr, _ = epochs.make_bundle("D1", "detector", I, V, N, info(), [], exposures(2))
