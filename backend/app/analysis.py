@@ -333,6 +333,27 @@ def diff_rgba(z: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
+def spike_mask(I_e: np.ndarray, V_e: np.ndarray, have_e: np.ndarray, detectors) -> np.ndarray:
+    """Single-channel spikes of ONE epoch: True where a channel is further from the median of its detector's channels
+    at that pixel than SPIKE_SIGMA times its noise plus SPIKE_REL times that median allow.
+
+    I_e, V_e, have_e: (C, H, W) image, variance and "this channel has data here" of one epoch; detectors: the detector
+    name of each of the C channels. Only channels in `have_e` are compared, and only at pixels where a detector has at
+    least SPIKE_MIN_CHANNELS of them. Most channels have one exposure, so a cosmic-ray hit or bad pixel that the flags
+    missed cannot be rejected when averaging; a real source is seen in all channels of a detector, a hit in one."""
+    detectors = np.asarray(detectors)
+    spike = np.zeros(have_e.shape, bool)
+    for det in np.unique(detectors):
+        g = detectors == det
+        h = have_e[g]
+        enough = h.sum(0) >= SPIKE_MIN_CHANNELS
+        Ig = np.where(h, I_e[g], np.nan)
+        med = np.nanmedian(Ig, axis=0)
+        with np.errstate(invalid="ignore"):
+            spike[g] = h & enough & (np.abs(Ig - med) > SPIKE_SIGMA * np.sqrt(V_e[g]) + SPIKE_REL * np.abs(med))
+    return spike
+
+
 STEP_ARRAY_PREFIX = "diff_s"  # make_bundle's arrays "diff_s0", "diff_s1", ...: the step differences
 
 
@@ -408,15 +429,10 @@ def make_bundle(bundle_id: str, kind: str, I: np.ndarray, V: np.ndarray, N: np.n
     common = np.all(have[usable], axis=0)  # (C, H, W)
     # single-channel spikes: compare each channel with the median of its detector's channels at that pixel and
     # epoch; a channel that fails in ANY usable epoch is dropped at that pixel in EVERY epoch
+    dets = [c["detector"] for c in chan_info]
     spike = np.zeros_like(common)
-    for det in sorted({c["detector"] for c in chan_info}):
-        g = np.array([c["detector"] == det for c in chan_info])
-        enough = common[g].sum(0) >= SPIKE_MIN_CHANNELS
-        for e in usable:
-            Ig = np.where(common[g], I[e][g], np.nan)
-            med = np.nanmedian(Ig, axis=0)
-            tol = SPIKE_SIGMA * np.sqrt(V[e][g]) + SPIKE_REL * np.abs(med)
-            spike[g] |= common[g] & enough & (np.abs(Ig - med) > tol)
+    for e in usable:
+        spike |= spike_mask(I[e], V[e], common, dets)
     common &= ~spike
     meta["spikes_rejected"] = int(spike.sum())
     K = common.sum(0)  # channels per pixel
@@ -561,19 +577,12 @@ def colour_composite(I: np.ndarray, V: np.ndarray, N: np.ndarray, chan_info: lis
     covered = have.reshape(E, C, -1).mean(-1) >= CHANNEL_MIN_FIELD_FRACTION  # (E, C)
     # single-channel spikes: further from the median of the detector's channels at that pixel than its noise and
     # SPIKE_REL times that median allow (the same test as make_bundle's); dropped like a flagged pixel
-    dets = np.array([c["detector"] for c in chan_info])
+    dets = [c["detector"] for c in chan_info]
     spikes = 0
     for e in range(E):
-        for det in np.unique(dets):
-            g = dets == det
-            h = have[e, g]
-            enough = h.sum(0) >= SPIKE_MIN_CHANNELS
-            Ig = np.where(h, I[e, g], np.nan)
-            med = np.nanmedian(Ig, axis=0)
-            with np.errstate(invalid="ignore"):
-                spike = h & enough & (np.abs(Ig - med) > SPIKE_SIGMA * np.sqrt(V[e, g]) + SPIKE_REL * np.abs(med))
-            spikes += int(spike.sum())
-            have[e, g] = h & ~spike
+        spike = spike_mask(I[e], V[e], have[e], dets)
+        spikes += int(spike.sum())
+        have[e] &= ~spike
     usable = [e for e in range(E) if covered[e].sum() > 0 and covered[e].sum() >= COLOUR_MIN_CHANNEL_FRACTION * C]
 
     comp = np.full((E, 3, H, W), np.nan, np.float32)
