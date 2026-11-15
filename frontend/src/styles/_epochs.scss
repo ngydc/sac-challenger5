@@ -536,6 +536,13 @@ dialog.detail {
   }
 }
 
+.detail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
 .detail-pic {
   display: flex;
   flex-direction: column;
@@ -597,8 +604,8 @@ dialog.detail {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  margin-top: 0.8rem;
-  padding: 1rem 1.1rem;
+  padding: 0.9rem 1rem;
+  scroll-margin-top: 0.8rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -611,21 +618,78 @@ dialog.detail {
 .spec-head {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 1rem;
 
+  .btn.icon {
+    flex: none; /* keep it square next to wrapping text */
+  }
   h3 {
     margin: 0 0 0.2rem;
     font-size: 1rem;
   }
 }
 
-.chart {
+.spec-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+/* Linear | Asinh: native radios drawn as .seg buttons */
+.seg.scale {
+  margin: 0;
+  min-width: 0;
+
+  .btn {
+    min-height: 30px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+  }
+  .btn:has(input:focus-visible) {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 2px;
+  }
+  .btn.off {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.chart-box {
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chart {
+  display: block;
+  max-width: 100%;
   height: auto;
 
+  .band {
+    fill: rgb(140 155 255 / 0.035);
+
+    &.alt {
+      fill: rgb(140 155 255 / 0.085);
+    }
+  }
+  .band-label {
+    fill: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: help;
+  }
   .grid {
     stroke: var(--border);
     stroke-width: 1;
+
+    &.zero {
+      stroke: var(--border-strong);
+    }
   }
   .tick,
   .axis {
@@ -633,6 +697,15 @@ dialog.detail {
     font-size: 11px;
   }
   circle {
+    pointer-events: none;
+  }
+  .hl {
+    stroke: var(--fg);
+    stroke-width: 1.5;
+  }
+  .hit {
+    fill: transparent;
+    pointer-events: all;
     cursor: default;
   }
 }
