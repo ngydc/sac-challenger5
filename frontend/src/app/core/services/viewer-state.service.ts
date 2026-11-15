@@ -8,6 +8,12 @@ import { bandsOf, framesOfVisit, pickFrame } from '../utils/frames';
 export type Stretch = 'fixed' | 'frame';
 export type Phase = 'idle' | 'resolving' | 'coverage' | 'ready' | 'failed';
 export type Playing = 'time' | 'wavelength' | null;
+/** single: one image at one wavelength (sliders). colour: every wavelength of a season in one colour picture. */
+export type ViewMode = 'single' | 'colour';
+
+/** Allowed field of view in degrees: the same limits as the backend (FOV_MIN, FOV_MAX in backend/app/core.py). */
+export const FOV_MIN = 0.01;
+export const FOV_MAX = 0.3;
 
 const DEBOUNCE_MS = 150;
 const BLINK_MS = 800;
@@ -56,6 +62,13 @@ export class ViewerState {
   readonly showRing = signal(true);
   readonly stretch = signal<Stretch>('fixed');
   readonly playing = signal<Playing>(null);
+  readonly mode = signal<ViewMode>('single');
+  /**
+   * The user chose the mode (the switch, the C key, or mode= in the page URL). Then it is kept for every target and
+   * never changed automatically. Otherwise each target starts in Mono and switches to Colour on its own if its colour
+   * picture is already computed (ColourStore).
+   */
+  readonly modeChosen = signal(false);
 
   readonly pick = computed(() => pickFrame(this.frames(), this.visit(), this.wavelength()));
   readonly band = computed(() => {
@@ -86,7 +99,8 @@ export class ViewerState {
       const pick = this.pick();
       const t = this.target();
       const opts = { mask: this.mask(), stretch: this.stretch() };
-      if (this.phase() !== 'ready' || !t) return;
+      // In colour mode the single-wavelength picture is hidden: nothing is loaded until the user switches back.
+      if (this.phase() !== 'ready' || !t || this.mode() === 'colour') return;
       clearTimeout(this.debounce);
       untracked(() => {
         if (!pick) {
@@ -134,16 +148,23 @@ export class ViewerState {
         p.set('visit', String(this.visit()));
         p.set('wl', this.wavelength().toFixed(3));
       }
+      // Only a chosen mode goes into the link; otherwise the recipient gets the same automatic choice.
+      if (this.modeChosen()) p.set('mode', this.mode() === 'colour' ? 'colour' : 'mono');
       this.location.replaceState(window.location.pathname, p.toString());
     });
   }
 
-  /** Reads ?q= (or ?ra=&dec=), ?fov=, ?visit=, ?wl= from the page URL and starts the search. */
+  /** Reads ?q= (or ?ra=&dec=), ?fov=, ?visit=, ?wl=, ?mode= from the page URL and starts the search. */
   initFromUrl(): void {
     const p = new URLSearchParams(window.location.search);
     const q = p.get('q') ?? (p.has('ra') && p.has('dec') ? `${p.get('ra')} ${p.get('dec')}` : null);
     const num = (k: string) => (p.has(k) && !isNaN(Number(p.get(k))) ? Number(p.get(k)) : undefined);
     this.initial = { visit: num('visit'), wl: num('wl') };
+    const mode = p.get('mode');
+    if (mode === 'colour' || mode === 'mono') {
+      this.mode.set(mode === 'colour' ? 'colour' : 'single');
+      this.modeChosen.set(true);
+    }
     if (q) this.search(q, num('fov'));
   }
 
@@ -204,7 +225,7 @@ export class ViewerState {
 
   /** New field of view: the frames are different, so the coverage is loaded again. */
   setFov(fov: number): void {
-    if (!this.resolved() || !(fov >= 0.01 && fov <= 0.3) || fov === this.fov()) return;
+    if (!this.resolved() || !(fov >= FOV_MIN && fov <= FOV_MAX) || fov === this.fov()) return;
     this.fov.set(fov);
     this.initial = { visit: this.visit(), wl: this.wavelength() };
     this.searchCtrl?.abort();
@@ -219,6 +240,9 @@ export class ViewerState {
   private async loadCoverage(ctrl: AbortController): Promise<void> {
     const t = this.target()!;
     this.stop();
+    // A new target starts in Mono unless the user chose a mode: an automatic Colour belonged to the previous target,
+    // and Colour mode would start a computation for a target that has none.
+    if (!this.modeChosen()) this.mode.set('single');
     this.phase.set('coverage');
     this.coverage.set(null);
     this.picture.set(null);
@@ -274,6 +298,22 @@ export class ViewerState {
   jumpTo(f: Frame): void {
     this.visit.set(f.visit);
     this.wavelength.set(f.wavelength_um);
+  }
+
+  /** The user's choice between the single-wavelength picture and the colour picture; the season stays. */
+  setMode(m: ViewMode): void {
+    this.modeChosen.set(true);
+    if (m === this.mode()) return;
+    if (this.playing() === 'wavelength') this.stop(); // a wavelength sweep has no meaning in colour
+    this.mode.set(m);
+  }
+
+  /** Switches to Colour on the page's own initiative (its picture is already computed). False if the user chose a mode. */
+  autoColour(): boolean {
+    if (this.modeChosen() || this.mode() === 'colour') return false;
+    if (this.playing() === 'wavelength') this.stop();
+    this.mode.set('colour');
+    return true;
   }
 
   // ---- playback ------------------------------------------------------------------------------

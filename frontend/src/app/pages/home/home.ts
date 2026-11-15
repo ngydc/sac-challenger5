@@ -11,6 +11,9 @@ import { EpochsStore } from '../../core/services/epochs-store.service';
 import { DeepPanel } from '../../components/epochs/deep-panel';
 import { DeepStage } from '../../components/epochs/deep-stage';
 import { BundleDetail } from '../../components/epochs/bundle-detail';
+import { ColourLegend } from '../../components/colour/colour-legend';
+import { ToastHost } from '../../components/toast/toast';
+import { ColourStore } from '../../core/services/colour-store.service';
 
 type TabId = 'controls' | 'history' | 'about';
 
@@ -31,7 +34,7 @@ const TABS: readonly { id: TabId; label: string; icon: string }[] = [
 /** Main page: the full-screen viewer, the brand/home button, the search bar, a small HUD and the menu with its tabs. */
 @Component({
   selector: 'app-home',
-  imports: [Viewer, SearchBar, ControlPanel, HistoryPanel, AboutPanel, Logo, DeepPanel, DeepStage, BundleDetail, DatePipe, DecimalPipe],
+  imports: [Viewer, SearchBar, ControlPanel, HistoryPanel, AboutPanel, Logo, DeepPanel, DeepStage, BundleDetail, ColourLegend, ToastHost, DatePipe, DecimalPipe],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
@@ -43,6 +46,8 @@ export class Home implements OnInit {
   protected readonly current = computed(() => TABS.find((t) => t.id === this.tab())!);
   /** Deep Analysis: its own drawer; while open, the stage shows the difference pictures. */
   protected readonly deep = inject(EpochsStore);
+  /** The colour picture of the current season (every wavelength in one picture). */
+  protected readonly colour = inject(ColourStore);
 
   ngOnInit(): void {
     this.s.initFromUrl();
@@ -84,7 +89,7 @@ export class Home implements OnInit {
     else document.documentElement.requestFullscreen?.();
   }
 
-  /** ← → season, ↑ ↓ next image in the season, space blink, M menu, Esc close menu. */
+  /** ← → season, ↑ ↓ next image in the season, space blink, C colour on/off, M menu, Esc close menu. */
   @HostListener('document:keydown', ['$event'])
   protected onKey(e: KeyboardEvent): void {
     const el = e.target as HTMLElement;
@@ -101,13 +106,18 @@ export class Home implements OnInit {
         break;
       case 'ArrowUp':
       case 'ArrowDown':
-        if (!ready) return;
+        if (!ready || this.s.mode() === 'colour') return; // a colour picture has every wavelength already
         this.s.stop();
         this.s.stepFrame(e.key === 'ArrowDown' ? -1 : 1);
         break;
       case ' ':
         if (!ready) return;
         this.s.toggle('time');
+        break;
+      case 'c':
+      case 'C':
+        if (!ready) return;
+        this.s.setMode(this.s.mode() === 'colour' ? 'single' : 'colour');
         break;
       case 'm':
       case 'M':

@@ -25,6 +25,62 @@
     </div>
   }
   @case ('ready') {
+    @if (s.mode() === 'colour') {
+    <figure class="frame" [style.aspect-ratio]="aspect()">
+      @if (c.url(); as url) {
+        <img [src]="url" [alt]="colourAlt()" draggable="false" />
+        @if (colourRing(); as r) {
+          <span class="ring" [style.left.%]="r.left" [style.top.%]="r.top" [style.width.%]="r.d"></span>
+        }
+        <span class="dir n" aria-hidden="true">N</span>
+        <span class="dir e" aria-hidden="true">E</span>
+      } @else if (c.error() || c.status()?.state === 'error') {
+        <div class="first" role="alert">
+          <p>The colour picture could not be made.</p>
+          <p class="muted small">{{ c.error() ?? c.status()?.message }}</p>
+          <button type="button" class="btn" (click)="c.retry()">Try again</button>
+        </div>
+      } @else if (c.colour() && c.epoch(); as e) {
+        <div class="first" role="status">
+          <p>No colour picture for this season.</p>
+          <p class="muted small">
+            It covers {{ e.n_channels }} of {{ c.colour()!.palette.length }} wavelength channels, too few for a
+            faithful colour. Step to another season.
+          </p>
+        </div>
+      } @else if (c.colour()) {
+        <div class="first" role="status">
+          <p>No colour picture for this season.</p>
+        </div>
+      } @else {
+        <div class="first" role="status">
+          @if (c.queued()) {
+            <h3><span class="dot busy"></span> Waiting</h3>
+            <p class="muted small">Other analyses are being computed; this colour image starts next.</p>
+          } @else if (c.running()) {
+            <h3><span class="dot busy"></span> Colour image being created</h3>
+            @if (c.progress(); as p) {
+              <div class="bar" role="progressbar" [attr.aria-valuenow]="p.pct" aria-valuemin="0" aria-valuemax="100">
+                <span [style.width.%]="p.pct"></span>
+              </div>
+              <p class="muted small">
+                {{ p.stage }} · {{ p.done }} / {{ p.total }} images
+                @if (p.eta) {
+                  · {{ p.eta }} left
+                }
+                @if (p.bundles_ready.length) {
+                  · ready: {{ p.bundles_ready.join(', ') }}
+                }
+              </p>
+            }
+          } @else {
+            <app-logo [size]="64" [spin]="true" />
+            <span>Looking for the colour image…</span>
+          }
+        </div>
+      }
+    </figure>
+    } @else {
     <figure class="frame" [style.aspect-ratio]="aspect()">
       @if (s.picture(); as p) {
         <img
@@ -54,6 +110,7 @@
         <div class="badge" role="alert">{{ err }}</div>
       }
     </figure>
+    }
   }
   @default {
     <div class="panel glass center" role="status" aria-live="polite">

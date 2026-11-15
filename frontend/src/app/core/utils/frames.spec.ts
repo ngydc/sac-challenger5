@@ -1,5 +1,5 @@
 import { Frame } from '../models/api.models';
-import { bandsOf, framesOfVisit, pickFrame } from './frames';
+import { bandsOf, framesOfVisit, pickFrame, ringPosition } from './frames';
 
 const f = (id: string, visit: number, detector: string, w: number, cache: Frame['cache'] = 'ready'): Frame => ({
   id,
@@ -47,5 +47,24 @@ describe('bandsOf / framesOfVisit', () => {
   it('lists a visit by wavelength without outside frames', () => {
     expect(framesOfVisit(frames, 1).map((x) => x.id)).toEqual(['e', 'd']);
     expect(framesOfVisit(frames, 0).map((x) => x.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('ringPosition', () => {
+  it('centres the ring on the pixel centre and flips y (the backend counts from the bottom)', () => {
+    const r = ringPosition(9.5, 0, 20, 10)!;
+    expect(r.left).toBeCloseTo(50.0, 6); // (9.5 + 0.5) / 20
+    expect(r.top).toBeCloseTo(95.0, 6); // (10 - 1 - 0 + 0.5) / 10 = bottom row
+    expect(r.d).toBe(25); // 5 / 20 of the width
+  });
+
+  it('keeps a minimum diameter of 4 % on wide pictures', () => {
+    expect(ringPosition(50, 50, 200, 200)?.d).toBe(4);
+  });
+
+  it('returns null outside the picture', () => {
+    expect(ringPosition(-1, 5, 20, 20)).toBeNull();
+    expect(ringPosition(5, 25, 20, 20)).toBeNull();
+    expect(ringPosition(25, 5, 20, 20)).toBeNull();
   });
 });

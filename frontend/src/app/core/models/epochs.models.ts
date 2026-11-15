@@ -49,6 +49,46 @@ export interface EpochsResult {
   n_images: number;
   failed: { reason: string }[];
   failed_retryable: number;
+  /** The colour pictures (/colour/{epoch}.png); null/missing until every detector is done (PIPELINE_VERSION 10 on). */
+  colour?: Colour | null;
+}
+
+/** One spectral channel and the colour it adds to the colour pictures. */
+export interface PaletteChannel {
+  detector: string;
+  channel: number;
+  wavelength_um: number | null;
+  wl_min_um: number | null;
+  wl_max_um: number | null;
+  /** #rrggbb */
+  colour: string;
+}
+
+export interface ColourEpoch {
+  index: number;
+  /** False: this epoch covers too few wavelengths, no colour picture. */
+  usable: boolean;
+  start: string | null;
+  end: string | null;
+  time: string | null;
+  /** One entry per palette channel: whether this epoch has it. */
+  channels_covered: boolean[];
+  n_channels: number;
+  /** Share of the covered pixels that are masked (saturated or flagged). */
+  masked_fraction: number | null;
+  covered_fraction: number | null;
+  /** Predicted target position in pixels at the epoch's median time: x from the left, y from the bottom. */
+  target_xy?: [number | null, number | null];
+}
+
+/** Every wavelength of one epoch in one picture: short wavelengths blue, long ones red. */
+export interface Colour {
+  palette: PaletteChannel[];
+  /** Colour of masked pixels, #rrggbb. */
+  mask_colour: string;
+  usable_epochs: number[];
+  epochs: ColourEpoch[];
+  note: string;
 }
 
 export interface RgbChoice {

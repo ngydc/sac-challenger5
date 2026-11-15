@@ -55,6 +55,11 @@ export class EpochsApi {
    * `step` null/undefined = "Total" (last minus first epoch, /diff.png); a number = that step (/steps/{step}.png).
    * Step 0 is a real step, so it is checked with `== null`, never with `if (step)`.
    */
+  /** The colour picture of one epoch (every wavelength in one picture). `v` as for `diffUrl`. */
+  colourUrl(p: Position, epoch: number, v = ''): string {
+    return `${API_BASE_URL}/analysis/colour/${epoch}.png?${targetQuery(p, { v: v || undefined })}`;
+  }
+
   diffUrl(p: Position, bundle: string, v = '', step?: number | null): string {
     const path = step == null ? 'diff.png' : `steps/${step}.png`;
     return `${API_BASE_URL}/analysis/${encodeURIComponent(bundle)}/${path}?${targetQuery(p, { v: v || undefined })}`;
