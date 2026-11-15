@@ -6,15 +6,18 @@ outside the image), tutorial-intro-spectral-images.md (spectral WCS), explanator
 (flag table). Measurements behind the design: docs/DATA_COVERAGE.md.
 
 Design in one paragraph: the API never waits on IRSA by default. `coverage` runs search + wavelength
-lookup in a background thread and is polled. Pixel data is fetched by a small pool of worker threads
-(IRSA answers 503 when hit harder) from a priority queue (0 = a user is waiting; a higher number is kept
-free for background prefetching, which the MVP API does not offer yet). Fetched cutouts are stored
-in Postgres (app/db.py, schema in app/schema.sql) together with the search results and calibration
+lookup in a background thread and is polled; it is stored per POSITION (+ motion), and each request filters
+it for its own field of view, so zooming needs no new lookup. Pixel data is fetched by a pool of worker
+threads from a priority queue (0 = a user is waiting, 1 = background prefetch). Cutouts are made from byte
+ranges of the S3 copy (app/cutout.py), so many can run at once; requests to IRSA itself stay limited
+(spherex.IRSA_SLOTS, it answers 503 when hit harder). As soon as a coverage is ready, every frame of the
+requested view is prefetched; a user's request for a queued frame moves it to the front. Fetched cutouts are
+stored in Postgres (app/db.py, schema in app/schema.sql) together with the search results and calibration
 files, and never go stale (the URL contains the file version). Only reprojected frames are kept in memory.
+Measurements behind these choices: docs/FETCH_SPEED.md.
 """
 from __future__ import annotations
 
-import hashlib
 import io
 import itertools
 import logging
@@ -29,118 +32,30 @@ from dataclasses import asdict, dataclass, field, fields
 
 import httpx
 import numpy as np
-import astropy.units as u
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.time import Time
 
-from . import db, presets, spherex
+from . import db, spherex
+from .core import (  # noqa: F401 - re-exported: older code imports these from here
+    CUTOUT_FACTOR, FOV_MAX, FOV_MIN, PIXEL_SCALE_ARCSEC, VISIT_GAP_DAYS, ApiError, TargetSpec, frame_id, iso,
+    parse_coord, split_frame_id,
+)
 
 log = logging.getLogger("spherex.service")
 
 # --- settings -------------------------------------------------------------------------------
-PIXEL_SCALE_ARCSEC = 6.15  # SPHEREx pixel size (docs/spherex/user-guide-data-products.md; header measures 6.15)
-CUTOUT_FACTOR = 1.45  # cutout side / view side: images are rotated vs north, a square this much larger always
-#                      fills the north-up view (needs sqrt(2) at worst; IRSA's cost barely depends on size)
-FOV_MIN, FOV_MAX = 0.01, 0.30  # degrees
-VISIT_GAP_DAYS = 30.0  # a gap longer than this between images starts a new visit (observing season)
-WORKERS = int(os.environ.get("SPHEREX_WORKERS", "3"))  # parallel requests to IRSA (it rate-limits)
+WORKERS = int(os.environ.get("SPHEREX_WORKERS", "8"))  # parallel cutout downloads (mostly S3; IRSA itself is
+#                                                       capped separately by spherex.IRSA_SLOTS)
+PREFETCH = os.environ.get("SPHEREX_PREFETCH", "1") != "0"  # fetch every frame of a view once its coverage is ready
+PRIORITY_USER, PRIORITY_PREFETCH, PRIORITY_ANALYSIS = 0, 1, 2  # lower runs first; only prefetch may be cancelled
 COVERAGE_TTL_S = 3600.0  # re-search after this long, so new weekly data appears
 REFRESH_RETRY_S = 120.0  # a failed refresh is retried after this long (the old data keeps being served)
 ERROR_RETRY_S = 15.0  # a failed first build is retried after this long
 COLLECTIONS_TTL_S = 3600.0  # ask IRSA for its collection list again after this long
 FAIL_COOLDOWN_S = 20.0  # after a failed download, don't hit IRSA again for this long
 SEARCH_RETRIES = 4  # IRSA's search service returns 502 now and then
-MAX_PIXELS_CACHE = 256  # aligned frames kept in memory
+MAX_ALIGNED_BYTES = int(os.environ.get("SPHEREX_FRAME_CACHE_MB", "256")) * 1_000_000  # aligned frames in memory
+#   (~20 KB per frame at fov 0.08, ~250 KB at fov 0.3; a count limit was smaller than one target's 350 frames)
 RECORD_FIELDS = [f.name for f in fields(spherex.ImageRecord)]
-
-
-class ApiError(Exception):
-    """An error with an HTTP status and a stable machine-readable code (see docs/API.md)."""
-
-    def __init__(self, status: int, code: str, message: str):
-        super().__init__(message)
-        self.status, self.code, self.message = status, code, message
-
-
-# --- target ---------------------------------------------------------------------------------
-def parse_coord(ra: str, dec: str) -> tuple[float, float]:
-    """RA/Dec as decimal degrees ("269.452", "4.6934") or sexagesimal ("17h57m48.5s", "+04d41m36s",
-    "17:57:48.5"). Returns degrees."""
-    ra, dec = str(ra).strip(), str(dec).strip()
-    try:
-        return float(ra), float(dec)
-    except ValueError:
-        pass
-    try:
-        c = SkyCoord(f"{ra} {dec}", unit=(u.hourangle, u.deg))
-    except Exception as err:
-        raise ApiError(400, "bad_coordinates", f"cannot read RA/Dec '{ra}' '{dec}': {err}") from err
-    return float(c.ra.deg), float(c.dec.deg)
-
-
-@dataclass(frozen=True)
-class TargetSpec:
-    """What the user is looking at: a sky position, a field of view and (optionally) the object's motion."""
-
-    ra: float  # deg, centre of the view (fixed on the sky)
-    dec: float
-    fov_deg: float
-    pmra: float | None = None  # mas/yr incl. cos(dec); with pmdec and pm_epoch, makes the predicted position move
-    pmdec: float | None = None
-    pm_epoch: float | None = None  # decimal year at which (ra, dec) is the object's position
-
-    @staticmethod
-    def build(ra: str, dec: str, fov: float, pmra: float | None, pmdec: float | None,
-              pm_epoch: float | None) -> "TargetSpec":
-        r, d = parse_coord(ra, dec)
-        if not (0 <= r < 360 or r == 360) or not (-90 <= d <= 90):
-            raise ApiError(400, "bad_coordinates", f"RA must be 0-360 deg and Dec -90..90 deg, got {r}, {d}")
-        if not (FOV_MIN <= fov <= FOV_MAX):
-            raise ApiError(400, "bad_fov", f"fov must be {FOV_MIN}-{FOV_MAX} degrees, got {fov}")
-        if len({pmra is None, pmdec is None, pm_epoch is None}) != 1:
-            raise ApiError(400, "bad_motion", "pmra, pmdec and pm_epoch must be given together, or not at all")
-        return TargetSpec(round(r % 360.0, 6), round(d, 6), round(fov, 5), pmra, pmdec, pm_epoch)
-
-    @property
-    def key(self) -> str:
-        raw = f"{self.ra:.6f},{self.dec:.6f},{self.fov_deg:.5f},{self.pmra},{self.pmdec},{self.pm_epoch}"
-        return hashlib.sha1(raw.encode()).hexdigest()[:12]
-
-    @property
-    def center(self) -> SkyCoord:
-        return SkyCoord(self.ra * u.deg, self.dec * u.deg)
-
-    @property
-    def cutout_size(self) -> float:
-        return round(self.fov_deg * CUTOUT_FACTOR, 5)
-
-    @property
-    def n_pix(self) -> int:
-        return int(math.ceil(self.fov_deg * 3600 / PIXEL_SCALE_ARCSEC))
-
-    def at(self, mjd: float) -> SkyCoord:
-        """Where the target is predicted to be at time `mjd` (the view centre if no motion was given)."""
-        if self.pmra is None:
-            return self.center
-        years = (mjd - presets.epoch_to_mjd(self.pm_epoch)) / 365.25
-        ra, dec = presets.propagate(self.ra, self.dec, self.pmra, self.pmdec, years)
-        return SkyCoord(ra * u.deg, dec * u.deg)
-
-
-def frame_id(record: spherex.ImageRecord) -> str:
-    return f"{record.obs_id}-{record.detector}"
-
-
-def split_frame_id(fid: str) -> tuple[str, str]:
-    obs_id, sep, det = fid.rpartition("-")
-    if not sep or not obs_id or not (len(det) == 2 and det[0] == "D" and det[1].isdigit()):
-        raise ApiError(400, "bad_frame_id", f"frame id must look like '2025W35_2A_0611_1-D2', got '{fid}'")
-    return obs_id, det
-
-
-def iso(mjd: float) -> str:
-    return Time(mjd, format="mjd").isot[:19] + "Z"
 
 
 # --- job queue ------------------------------------------------------------------------------
@@ -153,15 +68,20 @@ class JobQueue:
         for i in range(workers):
             threading.Thread(target=self._run, name=f"irsa-worker-{i}", daemon=True).start()
 
-    def submit(self, priority: int, fn) -> Future:
-        fut: Future = Future()
+    def submit(self, priority: int, fn, fut: Future | None = None) -> Future:
+        """Queue `fn`. Passing the Future of a job that is still queued queues it again with a better priority:
+        whichever entry a worker takes first runs it, the other entry is skipped."""
+        fut = fut if fut is not None else Future()
         self._q.put((priority, next(self._seq), fut, fn))
         return fut
 
     def _run(self) -> None:
         while True:
             _, _, fut, fn = self._q.get()
-            if not fut.set_running_or_notify_cancel():
+            try:
+                if not fut.set_running_or_notify_cancel():
+                    continue  # cancelled
+            except RuntimeError:  # already running or done through another queue entry
                 continue
             try:
                 fut.set_result(fn())
@@ -174,15 +94,31 @@ class JobQueue:
 
 # --- coverage -------------------------------------------------------------------------------
 @dataclass
+class CoverageView:
+    """A Coverage seen with one field of view: only the images that contain the whole view."""
+
+    state: str
+    message: str | None
+    located: int
+    total: int
+    records: dict[str, spherex.ImageRecord]  # frame_id -> record
+    exposures: list[spherex.Exposure]  # located images, time order
+    visits: list[list[spherex.ImageRecord]]  # one list of images per visit
+    visit_of: dict[str, int]  # frame_id -> visit index
+    collections: list[str] = field(default_factory=list)  # collections searched
+    data_as_of: float = 0.0  # when the search results came from IRSA (Unix time)
+
+
+@dataclass
 class Coverage:
-    spec: TargetSpec
+    """Everything known about one position (+ motion), for every field of view."""
+
+    spec: TargetSpec  # the first request's; only its position and motion matter
     state: str = "searching"  # searching | locating | ready | error
     message: str | None = None
     collections: list[str] = field(default_factory=list)
-    records: dict[str, spherex.ImageRecord] = field(default_factory=dict)  # frame_id -> record (after search)
+    records: dict[str, spherex.ImageRecord] = field(default_factory=dict)  # frame_id -> record, position inside
     exposures: list[spherex.Exposure] = field(default_factory=list)  # located images, time order
-    visits: list[list[spherex.ImageRecord]] = field(default_factory=list)  # one list of images per visit
-    visit_of: dict[str, int] = field(default_factory=dict)  # frame_id -> visit index
     located: int = 0
     total: int = 0
     failed_locate: int = 0
@@ -191,6 +127,20 @@ class Coverage:
     updated: float = field(default_factory=time.time)
     data_as_of: float = 0.0  # when the search results were obtained from IRSA
     next_refresh: float = 0.0  # when to look for new data again
+
+    def view(self, fov_deg: float) -> CoverageView:
+        """Keep the images whose edge is at least half the view's diagonal away from the position (the same
+        filter the search used to apply per fov), and group them into visits."""
+        margin = fov_deg / 2 * math.sqrt(2)
+        recs = [r for r in self.records.values() if r.edge_margin_deg >= margin]
+        keep = {frame_id(r) for r in recs}
+        visits = spherex.group_seasons(recs, VISIT_GAP_DAYS)
+        return CoverageView(
+            state=self.state, message=self.message, located=self.located, total=self.total,
+            records={frame_id(r): r for r in recs},
+            exposures=[e for e in self.exposures if frame_id(e.record) in keep],
+            visits=visits, visit_of={frame_id(r): i for i, v in enumerate(visits) for r in v},
+            collections=list(self.collections), data_as_of=self.data_as_of)
 
 
 @dataclass
@@ -213,11 +163,18 @@ class Service:
     def __init__(self, store: db.Store = db.store) -> None:
         self.db = store  # persistent cache (app/db.py): collections, coverage, cutouts, calibration files
         self._lock = threading.RLock()
-        self._cov: dict[str, Coverage] = {}  # live state, including builds in progress
+        self._cov: dict[str, Coverage] = {}  # coverage_key -> live state, including builds in progress
         self._jobs = JobQueue(WORKERS)
-        self._inflight: dict[str, Future] = {}  # cutout key -> running download
+        self._inflight: dict[str, Future] = {}  # cutout key -> running or queued download
+        self._job: dict[str, tuple[object, int]] = {}  # cutout key -> (job function, best priority queued)
+        self._wanted: set[str] = set()  # cutout keys a user or an analysis asked for (never cancelled as stale prefetch)
+        self._prefetch_view: dict[str, str] = {}  # coverage_key -> spec.key of the view being prefetched
+        self._prefetch_jobs: dict[str, list[tuple[str, Future]]] = {}  # coverage_key -> its queued downloads
         self._aligned: OrderedDict[tuple, AlignedFrame] = OrderedDict()  # hot frames, in memory only
-        self._client = httpx.Client(timeout=180, follow_redirects=True, limits=httpx.Limits(max_connections=WORKERS * 2))
+        self._aligned_bytes = 0
+        # each range cutout uses up to 4 connections at once (app/cutout.py)
+        self._client = httpx.Client(timeout=180, follow_redirects=True,
+                                    limits=httpx.Limits(max_connections=WORKERS * 4, max_keepalive_connections=WORKERS * 4))
 
     # -- search ------------------------------------------------------------------------------
     def collections(self) -> list[str]:
@@ -246,34 +203,28 @@ class Service:
                            "wavelength_um": e.wavelength_um if e else None,
                            "bandwidth_um": e.bandwidth_um if e else None})
         s = cov.spec
-        target = {"ra": s.ra, "dec": s.dec, "fov_deg": s.fov_deg, "pmra": s.pmra, "pmdec": s.pmdec, "pm_epoch": s.pm_epoch}
+        target = {"ra": s.ra, "dec": s.dec, "fov_deg": None, "pmra": s.pmra, "pmdec": s.pmdec, "pm_epoch": s.pm_epoch}
         try:
-            self.db.save_coverage(s.key, target, cov.collections, cov.failed_locate, cov.data_as_of, images)
+            self.db.save_coverage(s.coverage_key, target, cov.collections, cov.failed_locate, cov.data_as_of, images)
         except Exception:  # noqa: BLE001 - the coverage is still served from memory
-            log.exception("could not save coverage %s", s.key)
+            log.exception("could not save coverage %s", s.coverage_key)
 
     def _load(self, spec: TargetSpec) -> "Coverage | None":
-        data = self.db.load_coverage(spec.key)
+        data = self.db.load_coverage(spec.coverage_key)
         if data is None:
             return None
         recs, exposures = [], []
         for img in data["images"]:
-            r = spherex.ImageRecord(**{f: img[f] for f in RECORD_FIELDS})
+            r = spherex.ImageRecord(**{f: img[f] for f in RECORD_FIELDS if f in img})
             recs.append(r)
             if img["x"] is not None:
                 exposures.append(spherex.Exposure(r, img["x"], img["y"], img["wavelength_um"], img["bandwidth_um"]))
         cov = Coverage(spec, state="ready", collections=data["collections"], records={frame_id(r): r for r in recs},
                        failed_locate=data["failed_locate"], data_as_of=data["data_as_of"])
         cov.exposures = exposures
-        self._index_visits(cov, recs)
         cov.located = cov.total = len(recs)
         cov.next_refresh = data["data_as_of"] + COVERAGE_TTL_S
         return cov
-
-    @staticmethod
-    def _index_visits(cov: "Coverage", recs: list[spherex.ImageRecord]) -> None:
-        cov.visits = spherex.group_seasons(recs, VISIT_GAP_DAYS)
-        cov.visit_of = {frame_id(r): i for i, v in enumerate(cov.visits) for r in v}
 
     @staticmethod
     def _retry(fn, what: str):
@@ -289,30 +240,36 @@ class Service:
                 delay *= 2
 
     def _search(self, spec: TargetSpec) -> tuple[list[str], list[spherex.ImageRecord]]:
+        """Every image that contains the position, with its distance from the edge (any fov is filtered later)."""
         cols = self.collections()
         recs = self._retry(lambda: spherex.search(spec.center, cols), "search")
-        # keep only images where the whole view lies inside the image (half-diagonal from the edge)
-        recs = spherex.filter_records(recs, spec.center, min_edge_margin_deg=spec.fov_deg / 2 * math.sqrt(2))
-        return cols, recs
+        return cols, spherex.filter_records(recs, spec.center, min_edge_margin_deg=0.0)
 
     # -- coverage ----------------------------------------------------------------------------
-    def coverage(self, spec: TargetSpec) -> Coverage:
-        """The current knowledge about `spec`. Starts a background build the first time (and after errors
-        or when the data is older than COVERAGE_TTL_S); callers poll until state == "ready"."""
+    def coverage(self, spec: TargetSpec, all_images: bool = False) -> CoverageView:
+        """The current knowledge about `spec`'s position, filtered for its fov. Starts a background build the
+        first time (and after errors or when the data is older than COVERAGE_TTL_S); callers poll until
+        state == "ready". Once ready, every frame of this view is prefetched in the background.
+        `all_images=True` returns every image that contains the position, also where the view would cross the
+        image edge (the epoch maps use those too: their pictures simply have no data there)."""
         with self._lock:
-            cov = self._cov.get(spec.key)
+            ck = spec.coverage_key
+            cov = self._cov.get(ck)
             now = time.time()
             if cov is None:
                 saved = self._load(spec)  # an earlier visit (or before a restart): show it at once
                 if saved is not None:
-                    cov = self._cov[spec.key] = saved
+                    cov = self._cov[ck] = saved
             if cov is None or (cov.state == "error" and now - cov.updated > ERROR_RETRY_S):
-                cov = self._cov[spec.key] = Coverage(spec)
-                threading.Thread(target=self._build, args=(cov, None), daemon=True, name=f"cov-{spec.key}").start()
+                cov = self._cov[ck] = Coverage(spec)
+                threading.Thread(target=self._build, args=(cov, None), daemon=True, name=f"cov-{ck}").start()
             elif cov.state == "ready" and not cov.refreshing and now >= cov.next_refresh:
                 cov.refreshing = True  # look for new data in the background, keep serving what we have
-                threading.Thread(target=self._build, args=(Coverage(spec), cov), daemon=True, name=f"cov-{spec.key}").start()
-            return cov
+                threading.Thread(target=self._build, args=(Coverage(spec), cov), daemon=True, name=f"cov-{ck}").start()
+        view = cov.view(spec.fov_deg)
+        if view.state == "ready":
+            self._start_prefetch(spec, view)
+        return cov.view(0.0) if all_images else view
 
     def _build(self, cov: Coverage, replaces: Coverage | None) -> None:
         def progress(done: int, total: int) -> None:
@@ -322,21 +279,21 @@ class Service:
             cov.state = "searching"
             cov.collections, recs = self._search(cov.spec)
             cov.records = {frame_id(r): r for r in recs}
-            self._index_visits(cov, recs)
             cov.total = len(recs)
             cov.state = "locating"
             cov.updated = time.time()
-            exps, failed = spherex.locate_on_detector(recs, cov.spec.at, workers=8, on_progress=progress,
-                                                      calib_cache=self.db)
+            exps, failed = spherex.locate_on_detector(recs, cov.spec.at, on_progress=progress, calib_cache=self.db)
             cov.exposures, cov.failed_locate = exps, len(failed)
+            cov.located = cov.total
             cov.state, cov.updated = "ready", time.time()
             cov.data_as_of = cov.updated
             cov.next_refresh = cov.updated + COVERAGE_TTL_S
             self._save(cov)
             if replaces is not None:
                 with self._lock:
-                    self._cov[cov.spec.key] = cov
-            log.info("coverage %s ready: %d images, %d visits", cov.spec.key, len(exps), len(cov.visits))
+                    self._cov[cov.spec.coverage_key] = cov
+                    self._prefetch_view.pop(cov.spec.coverage_key, None)  # prefetch the new images too
+            log.info("coverage %s ready: %d images, %d not located", cov.spec.coverage_key, len(exps), len(failed))
         except Exception as err:  # noqa: BLE001
             msg = getattr(err, "message", str(err))[:300]
             log.error("coverage build failed: %s", msg)
@@ -348,19 +305,73 @@ class Service:
                 cov.state, cov.message, cov.updated = "error", msg, time.time()
 
     def record_for(self, spec: TargetSpec, fid: str) -> spherex.ImageRecord:
-        """Resolve a frame id to its image: from the coverage in memory or in the database, else by
-        searching again."""
+        """Resolve a frame id to its image (one that contains the whole view): from the coverage in memory or
+        in the database, else by searching again."""
         split_frame_id(fid)
-        cov = self._cov.get(spec.key) or self._load(spec)
-        if cov and fid in cov.records:
-            return cov.records[fid]
+        cov = self._cov.get(spec.coverage_key) or self._load(spec)
+        if cov is not None:
+            hit = cov.view(spec.fov_deg).records.get(fid)
+            if hit is not None:
+                return hit
         _, recs = self._search(spec)
         for r in recs:
-            if frame_id(r) == fid:
+            if frame_id(r) == fid and r.edge_margin_deg >= spec.edge_margin_deg:
                 return r
         raise ApiError(404, "unknown_frame", f"no image {fid} covers this position/field of view")
 
+    # -- prefetch ----------------------------------------------------------------------------
+    def _start_prefetch(self, spec: TargetSpec, view: CoverageView) -> None:
+        """Queue every frame of this view (once per view). A newer view of the same position replaces an older
+        one: its queued downloads are cancelled, unless a user asked for them."""
+        if not PREFETCH:
+            return
+        ck = spec.coverage_key
+        with self._lock:
+            if self._prefetch_view.get(ck) == spec.key:
+                return
+            self._prefetch_view[ck] = spec.key
+            stale = self._prefetch_jobs.pop(ck, [])
+            for key, fut in stale:
+                if key not in self._wanted:
+                    fut.cancel()  # only succeeds while still queued
+        threading.Thread(target=self._prefetch, args=(spec, view), daemon=True, name=f"prefetch-{ck}").start()
+
+    def _prefetch(self, spec: TargetSpec, view: CoverageView) -> None:
+        recs = [e.record for e in view.exposures if np.isfinite(e.wavelength_um)]
+        try:
+            states = self.frame_states(spec, recs)
+        except Exception:  # noqa: BLE001 - database down: nothing to prefetch into
+            log.exception("prefetch: could not read cache states")
+            return
+        jobs = []
+        for r, state in zip(recs, states):
+            if state != "missing":
+                continue
+            try:
+                fut = self.ensure_cutout(spec, r, PRIORITY_PREFETCH)
+            except Exception:  # noqa: BLE001 - outside / recently failed: skip
+                continue
+            if fut is not None:
+                jobs.append((self._cutout_ref(spec, r)[0], fut))
+        with self._lock:
+            if self._prefetch_view.get(spec.coverage_key) == spec.key:
+                self._prefetch_jobs[spec.coverage_key] = jobs
+                log.info("prefetching %d frames for view %s", len(jobs), spec.key)
+            else:  # the user moved on while we were queueing
+                for key, fut in jobs:
+                    if key not in self._wanted:
+                        fut.cancel()
+
     # -- cutouts -----------------------------------------------------------------------------
+    @property
+    def http(self) -> httpx.Client:
+        """The shared HTTP client (connection pool sized for the download workers)."""
+        return self._client
+
+    def cutout_data(self, spec: TargetSpec, record: spherex.ImageRecord) -> bytes | None:
+        """The stored cutout of `record` for `spec`'s view (FITS bytes), or None if not downloaded."""
+        return self.db.cutout(self._cutout_ref(spec, record)[0])
+
     @staticmethod
     def _cutout_ref(spec: TargetSpec, record: spherex.ImageRecord) -> tuple[str, str]:
         url = spherex.cutout_url(record, spec.center, spec.cutout_size)
@@ -388,6 +399,17 @@ class Service:
     def frame_state(self, spec: TargetSpec, record: spherex.ImageRecord) -> str:
         return self.frame_states(spec, [record])[0]
 
+    def _join(self, key: str, fut: Future, priority: int) -> Future:
+        """Share a pending download; a user (priority 0) waiting on a queued prefetch moves it to the front.
+        Anyone but the prefetch marks it as wanted, so a stale prefetch's cancellation leaves it alone."""
+        if priority != PRIORITY_PREFETCH:
+            self._wanted.add(key)
+        job, queued = self._job.get(key, (None, priority))
+        if job is not None and priority < queued and not fut.running():
+            self._job[key] = (job, priority)
+            self._jobs.submit(priority, job, fut=fut)
+        return fut
+
     def ensure_cutout(self, spec: TargetSpec, record: spherex.ImageRecord, priority: int) -> Future | None:
         """Make sure the cutout is (being) fetched. Returns None if already stored, else the pending Future
         (shared by everyone asking for the same cutout)."""
@@ -395,7 +417,7 @@ class Service:
         with self._lock:
             fut = self._inflight.get(key)
             if fut is not None and not fut.done():
-                return fut
+                return self._join(key, fut, priority)
         status, updated, message = self.db.cutout_states([key]).get(key, (None, 0.0, None))
         if status == "ready":
             return None
@@ -407,11 +429,12 @@ class Service:
         with self._lock:
             fut = self._inflight.get(key)
             if fut is not None and not fut.done():
-                return fut
+                return self._join(key, fut, priority)
 
             def job() -> None:
                 try:
-                    data = spherex.download_cutout(record, spec.center, spec.cutout_size, self._client)
+                    data = spherex.download_cutout(record, spec.center, spec.cutout_size, self._client,
+                                                   layouts=self.db)
                 except spherex.OutsideImageError:
                     self.db.put_cutout_failure(key, url, "outside", "outside image")
                     raise
@@ -422,17 +445,23 @@ class Service:
 
             fut = self._jobs.submit(priority, job)
             self._inflight[key] = fut
+            self._job[key] = (job, priority)
+            if priority != PRIORITY_PREFETCH:
+                self._wanted.add(key)
 
             def done(_f: Future, key=key) -> None:
                 with self._lock:
-                    self._inflight.pop(key, None)
+                    if self._inflight.get(key) is _f:
+                        self._inflight.pop(key, None)
+                        self._job.pop(key, None)
+                        self._wanted.discard(key)
 
             fut.add_done_callback(done)
             return fut
 
     # -- pixels ------------------------------------------------------------------------------
     def aligned_frame(self, spec: TargetSpec, record: spherex.ImageRecord) -> AlignedFrame:
-        """Read the stored cutout and put it on the view's north-up grid (~40 ms). Cutout must be stored."""
+        """Read the stored cutout and put it on the view's north-up grid (~65 ms). Cutout must be stored."""
         ck = (spec.key, frame_id(record))
         with self._lock:
             hit = self._aligned.get(ck)
@@ -456,10 +485,17 @@ class Service:
             flags_at_target=[f for f in frame.flags_at_target if f != "SOURCE"], version=frame.version,
         )
         with self._lock:
-            self._aligned[ck] = af
-            while len(self._aligned) > MAX_PIXELS_CACHE:
-                self._aligned.popitem(last=False)
+            if ck not in self._aligned:
+                self._aligned[ck] = af
+                self._aligned_bytes += _nbytes(af)
+            while self._aligned_bytes > MAX_ALIGNED_BYTES and len(self._aligned) > 1:
+                _, old = self._aligned.popitem(last=False)
+                self._aligned_bytes -= _nbytes(old)
         return af
+
+
+def _nbytes(af: AlignedFrame) -> int:
+    return af.image.nbytes + af.raw.nbytes + af.bad.nbytes
 
 service = Service()
 

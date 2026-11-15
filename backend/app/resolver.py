@@ -22,7 +22,7 @@ import httpx
 from astropy.coordinates import SkyCoord
 
 from . import presets
-from .service import ApiError
+from .core import ApiError
 
 # Tried in order; the first that answers wins. (The main CDS host redirects to another mirror and has
 # been unavailable at times, so the Harvard mirror goes first.)

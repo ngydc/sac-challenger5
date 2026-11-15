@@ -22,9 +22,11 @@ client = TestClient(app)
 POS = dict(ra="269.446", dec="4.768", fov="0.08")
 
 
-def rec(obs: str, det: str, mjd: float) -> spherex.ImageRecord:
+def rec(obs: str, det: str, mjd: float, margin: float = 1.0) -> spherex.ImageRecord:
+    """`margin`: distance of the position from the image edge, deg (decides for which fov the image counts)."""
     return spherex.ImageRecord(obs_id=obs, detector=det, collection="spherex_dr1", t_mid_mjd=mjd,
-                               access_url=f"https://example.invalid/ibe/data/spherex/dr1/{obs}{det}.fits", s_region="")
+                               access_url=f"https://example.invalid/ibe/data/spherex/dr1/{obs}{det}.fits", s_region="",
+                               edge_margin_deg=margin)
 
 
 class FakeStore:
@@ -73,22 +75,23 @@ def fresh(monkeypatch):
     """Empty service state backed by an empty in-memory store."""
     store = FakeStore()
     monkeypatch.setattr(svc.service, "db", store)
-    monkeypatch.setattr(svc.service, "_cov", {})
-    monkeypatch.setattr(svc.service, "_inflight", {})
-    monkeypatch.setattr(svc.service, "_aligned", svc.OrderedDict())
+    for name, empty in (("_cov", {}), ("_inflight", {}), ("_job", {}), ("_wanted", set()), ("_prefetch_view", {}),
+                        ("_prefetch_jobs", {}), ("_aligned", svc.OrderedDict()), ("_aligned_bytes", 0)):
+        monkeypatch.setattr(svc.service, name, empty)
+    monkeypatch.setattr(svc, "PREFETCH", False)  # tests that want it switch it on
     return store
 
 
-def seed_coverage(spec: TargetSpec) -> list[spherex.ImageRecord]:
-    """Store a finished coverage, as a previous visit would have done: 2 visits, 3 detectors."""
-    recs = [rec("A_1", "D1", 60900.0), rec("A_2", "D2", 60900.1), rec("A_3", "D5", 60900.2),
+def seed_coverage(spec: TargetSpec, svc_obj=None, near_edge: bool = False) -> list[spherex.ImageRecord]:
+    """Store a finished coverage, as a previous visit would have done: 2 visits, 3 detectors.
+    `near_edge`: A_3 lies only 0.1 deg from its image edge, so it only counts for small fields of view."""
+    recs = [rec("A_1", "D1", 60900.0), rec("A_2", "D2", 60900.1), rec("A_3", "D5", 60900.2, 0.1 if near_edge else 1.0),
             rec("B_1", "D1", 61100.0), rec("B_2", "D2", 61100.1)]
     wls = {"A_1-D1": 0.9, "A_2-D2": 1.3, "A_3-D5": 4.2, "B_1-D1": 0.95, "B_2-D2": 1.35}
-    cov = svc.Coverage(spec, state="ready", collections=["spherex_dr1"], data_as_of=1.7e9)
+    cov = svc.Coverage(spec, state="ready", collections=["spherex_dr1"], data_as_of=time.time())
     cov.records = {svc.frame_id(r): r for r in recs}
     cov.exposures = [spherex.Exposure(r, 10.0, 20.0, wls[svc.frame_id(r)], 0.03) for r in recs]
-    svc.service._index_visits(cov, recs)
-    svc.service._save(cov)
+    (svc_obj or svc.service)._save(cov)
     return recs
 
 
@@ -266,9 +269,9 @@ def test_resolve_input_errors():
 
 # --- the contract is exactly the MVP ---------------------------------------------------------
 def test_only_the_three_mvp_endpoints_exist():
-    # the epoch-map endpoints (app/epochs_api.py, tests in test_epochs.py) are a separate group
+    # the deep-analysis endpoints (app/analysis_api.py, tests in test_analysis_jobs.py) are a separate group
     paths = {p for p, ops in app.openapi()["paths"].items()
-             if not all("4. Epoch maps" in op.get("tags", []) for op in ops.values())}
+             if not all("4. Deep analysis" in op.get("tags", []) for op in ops.values())}
     assert paths == {"/api/resolve", "/api/coverage", "/api/frames/{frame_id}/image.png"}
     for gone in ("/api/presets", "/api/status", "/api/frames/A-D1/pixels"):
         assert client.get(gone).status_code == 404
@@ -451,3 +454,108 @@ def test_collections_come_from_the_store_while_fresh_and_when_irsa_is_down(fresh
     monkeypatch.setattr(svc, "COLLECTIONS_TTL_S", 0.0)
     monkeypatch.setattr(svc.time, "sleep", lambda s: None)
     assert svc.service.collections() == ["spherex_dr1", "spherex_qr3"]  # stale, IRSA down: last known list
+
+
+# --- one coverage per position, filtered per fov ----------------------------------------------
+def test_one_coverage_serves_every_fov(fresh, monkeypatch):
+    seed_coverage(TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None), near_edge=True)
+    builds = []
+    monkeypatch.setattr(svc.Service, "_build", lambda self, cov, replaces: builds.append(cov))
+    small = client.get("/api/coverage", params=POS).json()
+    wide = client.get("/api/coverage", params={**POS, "fov": "0.2"}).json()  # needs 0.14 deg from the edge
+    assert small["state"] == wide["state"] == "ready"
+    assert len(small["frames"]) == 5 and "A_3-D5" in {f["id"] for f in small["frames"]}
+    assert len(wide["frames"]) == 4 and "A_3-D5" not in {f["id"] for f in wide["frames"]}
+    assert wide["grid"]["width"] > small["grid"]["width"]
+    assert builds == []  # no new lookup for the second fov
+
+
+def test_a_frame_too_close_to_the_edge_for_the_fov_is_unknown(fresh, monkeypatch):
+    seed_coverage(TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None), near_edge=True)
+    monkeypatch.setattr(svc.Service, "_search", lambda self, spec: (["spherex_dr1"], []))
+    wide = TargetSpec.build(POS["ra"], POS["dec"], 0.2, None, None, None)
+    assert svc.service.record_for(TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None), "A_3-D5").obs_id == "A_3"
+    with pytest.raises(ApiError) as e:
+        svc.service.record_for(wide, "A_3-D5")
+    assert e.value.code == "unknown_frame"
+
+
+# --- prefetch ---------------------------------------------------------------------------------
+@pytest.fixture()
+def one_worker(monkeypatch):
+    """A Service with ONE download worker and an in-memory store; downloads block until released."""
+    monkeypatch.setattr(svc, "WORKERS", 1)
+    monkeypatch.setattr(svc, "PREFETCH", True)
+    s = svc.Service(store=FakeStore())
+    gate, order = threading.Event(), []
+
+    def download(record, *a, **k):
+        order.append(record.obs_id)
+        gate.wait(5)
+        return b"FITS"
+
+    monkeypatch.setattr(spherex, "download_cutout", download)
+    return s, gate, order
+
+
+def wait_for(cond, timeout=5.0):
+    t0 = time.time()
+    while not cond():
+        assert time.time() - t0 < timeout, "timed out"
+        time.sleep(0.01)
+
+
+def test_ready_coverage_prefetches_every_frame_and_a_user_request_jumps_the_queue(one_worker):
+    s, gate, order = one_worker
+    spec = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    recs = seed_coverage(spec, svc_obj=s)
+    s.coverage(spec)
+    wait_for(lambda: spec.coverage_key in s._prefetch_jobs)
+    assert len(s._prefetch_jobs[spec.coverage_key]) == 5
+    wait_for(lambda: len(order) == 1)  # the single worker is busy with the first frame
+    last = recs[-1]  # queued behind three others
+    s.ensure_cutout(spec, last, priority=0)
+    gate.set()
+    wait_for(lambda: len(order) == 5)
+    assert order[1] == last.obs_id  # the user's frame came right after the one already running
+    wait_for(lambda: s.frame_states(spec, recs) == ["ready"] * 5)
+    assert sorted(order) == sorted(r.obs_id for r in recs)  # each downloaded once
+
+
+def test_zooming_cancels_the_old_views_queued_prefetch(one_worker):
+    s, gate, order = one_worker
+    small = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    wide = TargetSpec.build(POS["ra"], POS["dec"], 0.1, None, None, None)
+    seed_coverage(small, svc_obj=s)
+    s.coverage(small)
+    wait_for(lambda: small.coverage_key in s._prefetch_jobs and len(order) == 1)
+    old = [f for _, f in s._prefetch_jobs[small.coverage_key]]
+    s.coverage(wide)  # the user zoomed out
+    assert sum(f.cancelled() for f in old) == 4  # all but the one already running
+    gate.set()
+    wait_for(lambda: len(order) == 6)  # 1 old (was running) + 5 for the new view
+    time.sleep(0.05)
+    assert len(order) == 6
+
+
+def test_a_requeued_job_runs_once():
+    q = svc.JobQueue(2)
+    runs = []
+    fut = q.submit(1, lambda: runs.append(1))
+    q.submit(0, lambda: runs.append(1), fut=fut)
+    fut.result(5)
+    time.sleep(0.05)
+    assert runs == [1]
+
+
+def test_a_download_the_analysis_waits_for_is_not_cancelled_by_a_zoom(one_worker):
+    s, gate, order = one_worker
+    small = TargetSpec.build(POS["ra"], POS["dec"], 0.08, None, None, None)
+    recs = seed_coverage(small, svc_obj=s)
+    s.coverage(small)
+    wait_for(lambda: small.coverage_key in s._prefetch_jobs and len(order) == 1)
+    shared = s.ensure_cutout(small, recs[-1], priority=svc.PRIORITY_ANALYSIS)  # joins the queued prefetch download
+    s.coverage(TargetSpec.build(POS["ra"], POS["dec"], 0.1, None, None, None))  # zoom: stale prefetch is cancelled
+    assert not shared.cancelled()
+    gate.set()
+    shared.result(5)

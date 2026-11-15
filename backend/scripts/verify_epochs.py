@@ -6,7 +6,7 @@ measurements printed and saved as JSON:
                 (they must coincide and be white: this tests reprojection and stretch)
   target        saturation (from the flags), centroid per epoch against the proper-motion prediction
 
-Run from backend/ after `python -m app.precompute`:
+Run from backend/ after the analyses exist (the backend computes them at start-up, or `python -m app.precompute`):
     .venv/bin/python -m scripts.verify_epochs [--targets r_dra,barnard]
 Outputs: backend/out/epochs_verify/<target>.png and <target>.json
 """
@@ -28,7 +28,8 @@ from scipy.optimize import least_squares
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
-from app import epochs, precompute, presets, spherex  # noqa: E402
+from app import presets, spherex  # noqa: E402
+from app.analysis_jobs import jobs, preset_specs  # noqa: E402
 from app.service import PIXEL_SCALE_ARCSEC  # noqa: E402
 
 STAR_MIN_SNR = 15.0  # field stars used for the alignment test: peak this many sigma above its surroundings
@@ -83,9 +84,8 @@ def verify(key: str, out: Path) -> dict:
     import matplotlib.pyplot as plt
 
     p = presets.find_preset(key)
-    spec = precompute.spec_of(p)
-    d = epochs._products(spec)
-    meta = epochs._read_json(d / "meta.json")
+    spec = dict(zip((q.key for q in presets.PRESETS), preset_specs()))[p.key]
+    d, meta = jobs.latest(spec)
     if not meta:
         print(f"{p.name}: not computed")
         return {}

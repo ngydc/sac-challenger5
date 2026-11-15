@@ -168,7 +168,10 @@ export class SpectrumPanel {
   private readonly api = inject(EpochsApi);
   readonly position = input.required<Position>();
   readonly x = input.required<number>();
+  /** Picture row from the TOP, as clicked. */
   readonly y = input.required<number>();
+  /** Picture height in pixels (the API counts rows from the bottom; see EpochsApi.spectrum). */
+  readonly height = input.required<number>();
   readonly closed = output<void>();
 
   protected readonly W = W;
@@ -248,12 +251,13 @@ export class SpectrumPanel {
       const p = this.position();
       const x = this.x();
       const y = this.y();
+      const height = this.height();
       const ctl = new AbortController();
       onCleanup(() => ctl.abort());
       this.loading.set(true);
       this.err.set(null);
       this.api
-        .spectrum(p, x, y, ctl.signal)
+        .spectrum(p, x, y, height, ctl.signal)
         .then((d) => this.data.set(d))
         .catch((e) => {
           if (!ctl.signal.aborted) this.err.set(friendly(e));
