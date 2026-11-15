@@ -86,4 +86,4 @@ analysis/<tier>/ra<deg>_dec<deg>_fov<deg>/
 
 `<tier>` is `examples` for the five test targets (never removed) and `temp` for every other position (removed after `SPHEREX_TEMP_CACHE_TTL_HOURS`, default 72, without use, and least recently used first above `SPHEREX_TEMP_CACHE_MAX_MB`, default 2000). A change of the computation gives a new `<params key>`, new images a new `<images key>`; the new folder is served once it is complete, and the old one is then removed.
 
-Data from the first version (`backend/cache/examples/`, `backend/cache/temp/`) is no longer read. `python -m scripts.import_examples` copies its downloaded cutouts into Postgres; the folders can be deleted afterwards.
+Data from the first version (`backend/cache/examples/`, `backend/cache/temp/`) is no longer read. Its downloaded cutouts were copied into Postgres and the folders deleted on 2026-11-15; if an old checkout still has them, delete them (the one-off import script, `scripts/import_examples.py`, is in the git history).

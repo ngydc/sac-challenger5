@@ -183,12 +183,11 @@ From `backend/`, with the virtual environment from `requirements.txt`:
 .venv\Scripts\python -m scripts.survey_coverage                   # all five targets -> backend/out/coverage/
 .venv\Scripts\python -m scripts.survey_coverage --targets R_Dra    # one target
 .venv\Scripts\python -m scripts.fetch_barnard --detector D6 --size 0.08
-.venv\Scripts\python -m scripts.explore_bands                      # temporary: every frame of every band -> backend/out/explore_<target>/viewer.html
 ```
 
-`explore_bands` builds a self-contained HTML viewer (band tabs, a time slider over observing seasons, a wavelength slider, a clickable coverage map; state can be given in the URL, e.g. `viewer.html#det=D5&t=1&w=4.2`) and one contact sheet per band (`frames_D1..D6.png`, one row per season, frames ordered by wavelength). For Barnard's Star it uses 349 cutouts and a 0.08° (47×47 px) field. It is for looking at the data only; the final API will look different.
+An earlier exploration script, `explore_bands` (removed 2026-11-15, still in the git history), built a throwaway HTML viewer of every frame in every band for Barnard's Star (349 cutouts, a 0.08° field), before the real frontend existed.
 
-**What the viewer showed:** Barnard's Star is saturated in several bands. Its core pixels carry `OVERFLOW`, `SUR_ERROR`, `BLOOM` (and sometimes `TRANSIENT`), and because `TRANSIENT` is in our bad-pixel list the core is blanked, so the target looks like a hole. For a blink tool the masking policy needs a decision: show saturated pixels (with a marker) instead of hiding them.
+**What that viewer showed:** Barnard's Star is saturated in several bands. Its core pixels carry `OVERFLOW`, `SUR_ERROR`, `BLOOM` (and sometimes `TRANSIENT`), and because `TRANSIENT` is in our bad-pixel list the core is blanked, so the target looks like a hole. For a blink tool the masking policy needs a decision: show saturated pixels (with a marker) instead of hiding them.
 
 The scripts need the backend's cache database (`docker compose up -d db` from the repo root). The first run downloads the wavelength maps (about 33 MB per release and detector, about 200 MB per release) and every cutout into it; later runs, and the API, reuse them. `coverage.csv` has one row per image (target, obs_id, detector, collection, time, pixel position, wavelength, bandwidth, edge distance, `access_url`). Use it to explore further.
 
