@@ -137,6 +137,19 @@ class Store:
                    WHERE cutout.status <> 'ready' OR EXCLUDED.status = 'ready'""",
                 (key, url, status, data, message))
 
+    # -- file layouts (app/cutout.FileLayout, compressed) -----------------------------------
+    def file_layout(self, url: str) -> bytes | None:
+        with self._connection() as conn:
+            row = conn.execute("SELECT layout FROM file_layout WHERE file_url = %s", (url,)).fetchone()
+        return bytes(row["layout"]) if row else None
+
+    def put_file_layout(self, url: str, data: bytes) -> None:
+        """Store or replace (a layout is only re-read when the stored one no longer fits the file)."""
+        with self._connection() as conn:
+            conn.execute("""INSERT INTO file_layout (file_url, layout) VALUES (%s, %s)
+                            ON CONFLICT (file_url) DO UPDATE SET layout = EXCLUDED.layout, created_at = now()""",
+                         (url, data))
+
     # -- calibration files (stored once per distinct content) --------------------------------
     def calibration(self, s3_key: str) -> bytes | None:
         with self._connection() as conn:

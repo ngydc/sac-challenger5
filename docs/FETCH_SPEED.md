@@ -60,8 +60,27 @@ End-to-end against the running backend (home connection):
 No request fell back to IRSA's cutout service, and the footprint check never failed. The old coverage rows
 (keyed with the fov) are no longer read, so each position is looked up once more (~6 s).
 
-Not done: storing each image's byte layout so a cutout needs one round of requests instead of five (would cut
-~0.75 s per cutout, see test 2), and the tile cache (see the caching section).
+### Stored byte layouts (added 2026-11-15)
+
+To cut a frame, the backend first has to find where each part sits in the file, which takes four header reads one
+after another (each header's position depends on the size of the part before it). After the first cutout of a file
+this is now stored (`app/cutout.FileLayout`, table `file_layout`, ~26 KB per image, keyed by the image's IRSA URL),
+so every later cutout of the same file (another fov, a pan, a nearby target, another user) skips those reads.
+A stored layout is only used if the file still has the same total size; otherwise it is read again.
+
+| Measured (real images) | Without stored layout | With stored layout |
+|---|---|---|
+| One cutout from S3, median of 12 | 1.05 s, 8 requests | **0.34 s, 3 requests** |
+| Result | | byte-identical in all 12 cases; a layout read from S3 also gave identical cutouts from IRSA's copy |
+| Prefetch of a whole view, Barnard's Star (fov 0.10, then 0.09; ~345 frames) | 105 s | 86 s |
+
+The prefetch gains only ~20% here because it is limited by the home connection, not by waiting: both runs downloaded
+at the same ~6.2 MB/s (8 cutouts at once), and the layout only removes the ~17% of the bytes that were headers. Each
+cutout still reads whole 2040-pixel rows from S3 (~1.6 MB at fov 0.09), since S3 can't return only the needed columns.
+A frame the user asks for (not competing with a full prefetch) gets the full 3× gain, and so would the prefetch on a
+server with a faster connection.
+
+Still not done: the tile cache (see the caching section).
 
 ## What a cutout costs today (test 1: `t1_irsa_cutout.py`)
 
@@ -117,9 +136,9 @@ Notes:
   it; **S3 does not and sends the whole 62 MB file instead**, so this must only ever go to IRSA. The result was
   checked identical to the whole-row version.
 - Of the ~1 s per S3 cutout, 0.75 s are four header reads one after another, and only 0.2 s is pixel data. A file's
-  headers never change (the URL contains the version), so storing each image's byte layout once (the coverage lookup
-  already reads the IMAGE header) would cut a cutout to one round of 3 parallel requests. About 320 KB of each
-  cutout's download is also header reads (64 KB per read), which a stored layout removes too.
+  headers never change (the URL contains the version), so storing each image's byte layout once cuts a later cutout
+  to one round of 3 parallel requests. About 320 KB of each cutout's download is also header reads (64 KB per read),
+  which a stored layout removes too. (Implemented since, see "Stored byte layouts" above.)
 - With 8 workers the per-cutout time goes up: the home connection was probably full (1.7 MB × 9 in 3.3 s). A server
   in a data centre, especially in AWS `us-east-1` next to the bucket, should do better.
 - IRSA's file server never answered 503 to range requests (also none in the 40 header reads of test 3); its cutout

@@ -104,3 +104,10 @@ def test_old_calibration_table_is_migrated(store):
         assert conn.execute("SELECT to_regclass('calibration_file') AS t").fetchone()["t"] is None
     assert store.calibration("dr1/old.fits") == store.calibration("qr3/old.fits") == b"x"
     assert store.calibration_digest("dr1/old.fits") == store.calibration_digest("qr3/old.fits")
+
+
+def test_file_layouts(store):
+    assert store.file_layout("https://x/f.fits") is None
+    store.put_file_layout("https://x/f.fits", b"\x00one")
+    store.put_file_layout("https://x/f.fits", b"\x00two")  # replaced (only re-read when the old one was stale)
+    assert store.file_layout("https://x/f.fits") == b"\x00two"

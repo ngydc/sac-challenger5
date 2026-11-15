@@ -38,7 +38,7 @@ from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 from reproject import reproject_interp
 
-from .cutout import NoRangeSupport, OutsideImageError, range_cutout  # noqa: F401 - OutsideImageError is re-exported
+from .cutout import FileLayout, NoRangeSupport, OutsideImageError, Stats, range_cutout  # noqa: F401 - re-exported
 
 log = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
@@ -223,25 +223,54 @@ def cutout_key(url: str) -> str:
 IRSA_SLOTS = threading.BoundedSemaphore(int(os.environ.get("SPHEREX_IRSA_WORKERS", "3")))
 
 
+class LayoutCache(Protocol):
+    """Where FileLayouts (app/cutout.py) are kept, keyed by the image's access_url (app/db.py's Store)."""
+
+    def file_layout(self, url: str) -> bytes | None: ...
+    def put_file_layout(self, url: str, data: bytes) -> None: ...
+
+
 def download_cutout(record: ImageRecord, center: SkyCoord, size_deg: float, client: httpx.Client,
-                    retries: int = 6) -> bytes:
+                    retries: int = 6, layouts: LayoutCache | None = None) -> bytes:
     """A cutout as FITS bytes (IMAGE, FLAGS, ZODI, WCS-WAVE; no PSF), identical to what IRSA's cutout service
     returns for cutout_url(record, center, size_deg), so both share one cache key.
 
     Sources, fastest first (docs/FETCH_SPEED.md): our own cutout from byte ranges of the S3 copy (~1 s, no rate
     limit seen); the same from IRSA's file server (only the needed columns); IRSA's cutout service (6-12 s).
-    A cutout outside the image raises OutsideImageError at once; any other failure moves on to the next source."""
+    A cutout outside the image raises OutsideImageError at once; any other failure moves on to the next source.
+
+    With `layouts`, where each part of the file sits is remembered after the first cutout of an image, so later
+    cutouts of it (another fov, a pan, a nearby target) need one round of requests instead of five. The S3 and
+    IRSA copies are the same file, so one layout serves both (range_cutout re-checks the file size every time)."""
+    layout = None
+    if layouts is not None:
+        try:
+            stored = layouts.file_layout(record.access_url)
+            layout = FileLayout.loads(stored) if stored else None
+        except Exception:  # noqa: BLE001 - no layout cache: read the headers as usual
+            log.exception("could not read the stored file layout")
+
+    def attempt(url: str, multirange: bool) -> bytes:
+        st = Stats()
+        data = range_cutout(url, center, size_deg, client, stats=st, multirange=multirange, layout=layout)
+        if layouts is not None and st.layout is not None and not st.layout_reused:
+            try:
+                layouts.put_file_layout(record.access_url, st.layout.dumps())
+            except Exception:  # noqa: BLE001 - the cutout itself is fine
+                log.exception("could not store the file layout")
+        return data
+
     problems = []
     if record.cloud_url:
         try:
-            return range_cutout(record.cloud_url, center, size_deg, client)
+            return attempt(record.cloud_url, False)
         except OutsideImageError:
             raise
         except Exception as err:  # noqa: BLE001 - e.g. a file that is not on S3 yet (404)
             problems.append(f"S3: {type(err).__name__}: {str(err)[:120]}")
     with IRSA_SLOTS:
         try:
-            return range_cutout(record.access_url, center, size_deg, client, multirange=True)
+            return attempt(record.access_url, True)
         except OutsideImageError:
             raise
         except Exception as err:  # noqa: BLE001
@@ -372,7 +401,8 @@ def fetch_frames(
             key = cutout_key(url)
             data = cache.cutout(key) if cache else None
             if data is None:
-                data = download_cutout(rec, center, size_deg, client)
+                data = download_cutout(rec, center, size_deg, client,
+                                       layouts=cache if hasattr(cache, "file_layout") else None)
                 if cache:
                     cache.put_cutout(key, url, data)
             with fits.open(io.BytesIO(data)) as hdul:

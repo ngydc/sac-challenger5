@@ -524,7 +524,8 @@ class Service:
 
             def job() -> None:
                 try:
-                    data = spherex.download_cutout(record, spec.center, spec.cutout_size, self._client)
+                    data = spherex.download_cutout(record, spec.center, spec.cutout_size, self._client,
+                                                   layouts=self.db)
                 except spherex.OutsideImageError:
                     self.db.put_cutout_failure(key, url, "outside", "outside image")
                     raise

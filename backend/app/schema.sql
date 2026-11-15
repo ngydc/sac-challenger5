@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS cutout (
     CHECK ((status = 'ready') = (fits IS NOT NULL))
 );
 
+-- Where each part of an image file sits (byte offsets, the headers a cutout copies, the FLAGS row index):
+-- app/cutout.FileLayout as compressed JSON, ~26 KB. Lets a later cutout of the same file skip four header
+-- requests. file_url is the image's access_url, which contains the file version, so a layout never goes stale;
+-- it is still checked against the file size on every use.
+CREATE TABLE IF NOT EXISTS file_layout (
+    file_url   text PRIMARY KEY,
+    layout     bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- Spectral WCS calibration files (CWAVE/CBAND per release and detector, ~33 MB each). Stored once per
 -- distinct content: DR1 and QR3 ship byte-identical files under different S3 keys.
 CREATE TABLE IF NOT EXISTS calibration_blob (

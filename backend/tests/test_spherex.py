@@ -219,3 +219,71 @@ def test_locate_checks_the_footprint_and_falls_back_to_headers(monkeypatch, orde
     for e in exps:
         assert (e.x, e.y) == (pytest.approx(1500.0, abs=0.05), pytest.approx(400.0, abs=0.05))
         assert e.wavelength_um == pytest.approx(float(cwave[400, 1500]))
+
+
+# --- stored file layouts --------------------------------------------------------------------
+def test_file_layout_survives_storage_and_rejects_other_formats():
+    st = cutout.Stats()
+    cutout.range_cutout("https://x.invalid/f.fits", CENTER, 40 * SCALE, server(FILE, True), stats=st)
+    lay = st.layout
+    assert lay is not None and lay.size == len(FILE) and not st.layout_reused
+    assert cutout.FileLayout.loads(lay.dumps()) == lay
+    assert len(lay.dumps()) < 20_000
+    assert cutout.FileLayout.loads(b"garbage") is None
+    import json, zlib
+    other = json.loads(zlib.decompress(lay.dumps()))
+    other["format"] = 999
+    assert cutout.FileLayout.loads(zlib.compress(json.dumps(other).encode())) is None
+
+
+def test_a_stored_layout_needs_one_round_of_three_requests_and_gives_the_same_cutout():
+    first, again = cutout.Stats(), cutout.Stats()
+    url = "https://x.invalid/f.fits"
+    fresh = cutout.range_cutout(url, CENTER, 40 * SCALE, server(FILE, False), stats=first)
+    log: list = []
+    other_center = SkyCoord(*sky_wcs().pixel_to_world_values(200.0, 60.0), unit="deg")  # a pan: other rows
+    reused = cutout.range_cutout(url, other_center, 40 * SCALE, server(FILE, False, log=log), stats=again,
+                                 layout=first.layout)
+    assert again.layout_reused and len(log) == 3 and again.round_trips == 1 and first.round_trips == 5
+    with fits.open(io.BytesIO(reused)) as h:
+        x0, y0, nx, ny = again.box
+        for name, full in ARRAYS.items():
+            np.testing.assert_array_equal(h[name].data, full[y0:y0 + ny, x0:x0 + nx])
+    same = cutout.range_cutout(url, CENTER, 40 * SCALE, server(FILE, False), layout=first.layout)
+    assert same == fresh  # byte-identical to the cutout made by walking the headers
+
+
+def test_a_layout_that_does_not_fit_the_file_is_read_again():
+    st = cutout.Stats()
+    cutout.range_cutout("https://x.invalid/f.fits", CENTER, 40 * SCALE, server(FILE, True), stats=st)
+    wrong = cutout.FileLayout(**{**st.layout.__dict__, "size": st.layout.size + 2880})
+    again = cutout.Stats()
+    data = cutout.range_cutout("https://x.invalid/f.fits", CENTER, 40 * SCALE, server(FILE, True), stats=again,
+                               layout=wrong)
+    assert not again.layout_reused and again.layout == st.layout
+    with fits.open(io.BytesIO(data)) as h:
+        x0, y0, nx, ny = again.box
+        np.testing.assert_array_equal(h["IMAGE"].data, ARRAYS["IMAGE"][y0:y0 + ny, x0:x0 + nx])
+
+
+class Layouts:
+    def __init__(self):
+        self.rows, self.puts = {}, 0
+
+    def file_layout(self, url):
+        return self.rows.get(url)
+
+    def put_file_layout(self, url, data):
+        self.puts += 1
+        self.rows[url] = data
+
+
+def test_download_cutout_stores_the_layout_under_the_irsa_url_and_reuses_it():
+    layouts, log = Layouts(), []
+    client = server(FILE, False, log=log)
+    rec = record(cloud="https://bucket.invalid/dr1/f.fits")
+    first = spherex.download_cutout(rec, CENTER, 40 * SCALE, client, layouts=layouts)
+    assert layouts.puts == 1 and list(layouts.rows) == [rec.access_url]
+    n_first = len(log)
+    second = spherex.download_cutout(rec, CENTER, 40 * SCALE, client, layouts=layouts)
+    assert second == first and len(log) - n_first == 3 and layouts.puts == 1  # reused, not stored again
