@@ -3,16 +3,15 @@
     <section class="hero">
       <app-logo [size]="76" />
       <p class="kicker">Challenger5 · SPHEREx infrared sky explorer</p>
-      <h1>Visualize the known.<br /><span class="grad-text">Challenge the unknown.</span></h1>
-      <p class="lede">
-        Discover what lies hidden beneath the starlit sky. Enter an object or sky coordinates and
-        blink through every SPHEREx observation of that position, across time and infrared
-        wavelength, to reveal what moves and what changes.
-      </p>
-      <div class="examples" role="group" aria-label="Example targets">
-        @for (e of examples; track e.name) {
-          <button type="button" class="btn" (click)="s.search(e.name)">{{ e.name }}</button>
-        }
+      <h1>Visualize the known.<br /><span class="second">Challenge the unknown.</span></h1>
+      <p class="lede">Discover what lies hidden beneath the starlit sky.</p>
+      <div class="start">
+        <p id="examples-title">Get started with {{ examples.length }} examples:</p>
+        <div class="examples" role="group" aria-labelledby="examples-title">
+          @for (e of examples; track e.name) {
+            <button type="button" class="btn" [title]="e.what" (click)="s.search(e.name)">{{ e.name }}</button>
+          }
+        </div>
       </div>
       <p class="credit">NASA Space Apps Challenge 2026 · Data: SPHEREx (NASA/JPL-Caltech) via IRSA</p>
     </section>

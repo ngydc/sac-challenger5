@@ -1,23 +1,33 @@
 <form role="search" class="glass" (submit)="submit($event)" (focusin)="show()" (focusout)="onFocusOut($event)" (keydown)="onKey($event)">
   <label for="q" class="sr-only">Object name or coordinates</label>
   <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-  <input
-    #q
-    id="q"
-    type="search"
-    role="combobox"
-    aria-autocomplete="list"
-    aria-controls="suggest"
-    [attr.aria-expanded]="open()"
-    [attr.aria-activedescendant]="marked() >= 0 ? 'sg-' + marked() : null"
-    autocomplete="off"
-    spellcheck="false"
-    placeholder="Object name or coordinates, e.g. 17h57m48.5s +04d41m36s"
-    maxlength="120"
-    [value]="text()"
-    (input)="text.set($any($event.target).value); show()"
-    (click)="show()"
-  />
+  <span class="field">
+    <input
+      #q
+      id="q"
+      type="search"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-controls="suggest"
+      aria-describedby="q-hint"
+      [attr.aria-expanded]="open()"
+      [attr.aria-activedescendant]="marked() >= 0 ? 'sg-' + marked() : null"
+      autocomplete="off"
+      spellcheck="false"
+      maxlength="120"
+      [value]="text()"
+      (input)="text.set($any($event.target).value); show()"
+      (click)="show()"
+    />
+    <!-- The placeholder: a real example that changes every few seconds (fades in, so it is a span, not the
+         placeholder attribute). Only while the box is empty. -->
+    <span id="q-hint" class="sr-only">Type an object name or coordinates, for example {{ hints[0] }} or {{ hints[1] }}.</span>
+    @if (!text()) {
+      @for (h of [hint()]; track h) {
+        <span class="example-hint" aria-hidden="true">e.g. <span class="num-ish">{{ h }}</span></span>
+      }
+    }
+  </span>
   <button type="submit" class="btn" [class.primary]="s.phase() !== 'resolving'" [disabled]="!text().trim() || s.phase() === 'resolving'">
     @if (s.phase() === 'resolving') {
       <app-logo [size]="22" [spin]="true" /><span class="sr-only">Searching</span>

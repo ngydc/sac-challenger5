@@ -14,7 +14,8 @@
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 72px 16px 72px;
+  /* The right padding keeps the picture clear of the menu buttons' column. */
+  padding: 72px 76px 72px 16px;
   container: stage / size;
 }
 
@@ -44,10 +45,10 @@
   background: transparent;
   color: var(--fg);
   cursor: pointer;
-  transition: filter 0.2s;
+  transition: opacity 0.15s;
 
   &:hover {
-    filter: drop-shadow(0 0 10px rgb(139 155 255 / 0.7));
+    opacity: 0.8;
   }
 }
 
@@ -72,7 +73,7 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  max-width: calc(100% - 32px - 160px);
+  max-width: calc(100% - 32px - 60px); /* clear of the menu buttons */
   padding: 0.35rem;
   border-radius: 14px;
 }
@@ -105,14 +106,16 @@
 
 /*
  * ---- the menu buttons at the bottom right ----
- * A row of icons in the free band below the picture; on a wide stage (where the picture leaves
- * room beside it) a labelled stack. Either way they never cover the picture.
+ * Always a vertical stack: icons only in the stage's right padding, with labels when the stage is wide
+ * enough for the picture to leave room beside it. Either way they never cover the picture.
  */
 .dock {
   position: absolute;
   right: 16px;
   bottom: 14px;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.45rem;
 
   .btn {
@@ -124,9 +127,6 @@
   }
   span {
     display: none;
-  }
-  .btn.active {
-    box-shadow: var(--glow);
   }
   svg {
     flex: none;
@@ -141,17 +141,16 @@
 }
 
 @container stage (min-width: 1150px) and (min-aspect-ratio: 14 / 10) {
-  .dock {
-    flex-direction: column;
-
-    .btn {
-      justify-content: flex-start;
-      width: auto;
-      padding: 0.45rem 0.9rem;
-    }
-    span {
-      display: inline;
-    }
+  .dock .btn {
+    justify-content: flex-start;
+    width: auto;
+    padding: 0.45rem 0.9rem;
+  }
+  .dock span {
+    display: inline;
+  }
+  .hud {
+    max-width: calc(100% - 32px - 200px);
   }
 }
 
@@ -160,7 +159,7 @@
   flex: none;
   width: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, #0c1026, var(--surface));
+  background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: -20px 0 50px rgb(0 0 0 / 0.4);
   transition: width 0.25s ease;
@@ -191,7 +190,7 @@
   margin: 0 -1.1rem 1rem;
   padding: 1rem 1.1rem 0.8rem;
   border-bottom: 1px solid var(--border);
-  background: rgb(11 14 34 / 0.9);
+  background: var(--surface);
   backdrop-filter: blur(10px);
 
   .btn {
@@ -284,7 +283,7 @@
     left: 10px;
     right: 10px;
     bottom: 10px;
-    flex-direction: row-reverse;
+    flex-direction: row;
 
     .btn {
       flex: 1;

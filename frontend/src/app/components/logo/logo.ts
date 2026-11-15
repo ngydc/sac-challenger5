@@ -1,29 +1,22 @@
 import { Component, input } from '@angular/core';
 
-let nextId = 0;
-
 /**
- * The CHALLENGER5 mark: a "5" inside a tilted orbit with one satellite.
- * With `spin` it is the app's loading indicator (the orbit turns around the 5).
- * The same drawing is in public/favicon.svg; change both together.
+ * The CHALLENGER5 mark: one object seen at three epochs (violet, blue, then white with a ring) along its
+ * track, between two fixed background stars. That is what the blink viewer reveals: what moves.
+ * With `spin` it is the app's loading indicator (the three positions light up one after the other).
+ * The same drawing, on a dark tile, is in public/favicon.svg (and the PNGs rendered from it, see src/index.html); change them together.
  */
 @Component({
   selector: 'app-logo',
   template: `
     <svg viewBox="0 0 48 48" [attr.width]="size()" [attr.height]="size()" [class.spin]="spin()" aria-hidden="true">
-      <defs>
-        <linearGradient [attr.id]="id" x1="4" y1="6" x2="44" y2="42" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#4fd8ff" />
-          <stop offset=".55" stop-color="#8b9bff" />
-          <stop offset="1" stop-color="#c084fc" />
-        </linearGradient>
-      </defs>
-      <g class="orbit">
-        <ellipse cx="24" cy="24" rx="21" ry="8.5" transform="rotate(-28 24 24)" fill="none" [attr.stroke]="'url(#' + id + ')'" stroke-width="1.8" />
-        <circle cx="42.5" cy="14.1" r="2.6" fill="#fff" />
-      </g>
-      <path class="five back" [attr.d]="five" />
-      <path class="five" [attr.d]="five" />
+      <circle cx="10" cy="12" r="2" fill="#7d8296" />
+      <circle cx="39" cy="39" r="2" fill="#7d8296" />
+      <path d="M12 37L33 16" stroke="#3b7cf0" stroke-opacity=".55" stroke-width="4.5" stroke-linecap="round" />
+      <circle class="p p1" cx="12" cy="37" r="5" fill="#7c5cff" />
+      <circle class="p p2" cx="22" cy="27" r="5.5" fill="#3fa2ff" />
+      <circle class="p p3" cx="33" cy="16" r="9.5" fill="none" stroke="#1f5c58" stroke-width="3.5" />
+      <circle class="p p3" cx="33" cy="16" r="7" fill="#fff" />
     </svg>
   `,
   styles: `
@@ -34,37 +27,23 @@ let nextId = 0;
     svg {
       display: block;
       overflow: visible;
-      filter: drop-shadow(0 0 6px rgb(139 155 255 / 0.45));
     }
-    .five {
-      fill: none;
-      stroke: #fff;
-      stroke-width: 3.8;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+    .spin .p {
+      animation: c5-blink 1.2s ease-in-out infinite;
     }
-    /* A dark outline, so the orbit seems to pass behind the 5. */
-    .back {
-      stroke: var(--bg);
-      stroke-width: 8;
+    .spin .p2 {
+      animation-delay: 0.2s;
     }
-    .orbit {
-      transform-origin: 24px 24px;
+    .spin .p3 {
+      animation-delay: 0.4s;
     }
-    .spin .orbit {
-      animation: c5-orbit 1.5s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
-    }
-    .spin .five:not(.back) {
-      animation: c5-pulse 1.5s ease-in-out infinite;
-    }
-    @keyframes c5-orbit {
-      to {
-        transform: rotate(360deg);
+    @keyframes c5-blink {
+      0%,
+      100% {
+        opacity: 0.3;
       }
-    }
-    @keyframes c5-pulse {
-      50% {
-        opacity: 0.55;
+      30% {
+        opacity: 1;
       }
     }
   `,
@@ -72,8 +51,4 @@ let nextId = 0;
 export class Logo {
   readonly size = input(32);
   readonly spin = input(false);
-
-  protected readonly id = `c5-grad-${nextId++}`;
-  protected readonly five =
-    'M30.5 13.5H20.2l-1.5 10c1.9-1.3 3.9-1.9 5.9-1.9 4.7 0 7.4 3 7.4 6.6 0 4-3.1 6.6-7.5 6.6-3.1 0-5.6-1.2-7.2-3.3';
 }

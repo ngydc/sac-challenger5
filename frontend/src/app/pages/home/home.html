@@ -38,10 +38,23 @@
       </div>
     }
 
-    <!-- One button per menu tab. A new tab is one more entry in `tabs` plus its panel in the drawer.
-         Deep Analysis has its own drawer (#deep); its button sits between History and Controls. -->
+    <!-- The menu buttons, top to bottom: Controls, Deep Analysis, History, About. Deep Analysis has its own
+         drawer (#deep); the others open a tab of #drawer. A new tab is one more entry in TABS plus its panel. -->
     <nav class="dock" aria-label="Menu">
       @for (t of tabs; track t.id) {
+        <button
+          type="button"
+          class="btn glass"
+          [class.active]="menuOpen() && tab() === t.id"
+          aria-controls="drawer"
+          [title]="t.label"
+          [attr.aria-label]="t.label"
+          [attr.aria-expanded]="menuOpen() && tab() === t.id"
+          (click)="toggleTab(t.id)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="t.icon" /></svg>
+          <span>{{ t.label }}</span>
+        </button>
         @if (t.id === 'controls') {
           <button
             type="button"
@@ -57,19 +70,6 @@
             <span>Deep Analysis</span>
           </button>
         }
-        <button
-          type="button"
-          class="btn glass"
-          [class.active]="menuOpen() && tab() === t.id"
-          aria-controls="drawer"
-          [title]="t.label"
-          [attr.aria-label]="t.label"
-          [attr.aria-expanded]="menuOpen() && tab() === t.id"
-          (click)="toggleTab(t.id)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="t.icon" /></svg>
-          <span>{{ t.label }}</span>
-        </button>
       }
     </nav>
   </main>

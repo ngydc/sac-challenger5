@@ -134,7 +134,7 @@ Status: **planned** (agreed, not built), **in progress**, **done**. New features
 | F9 | Start page with slogan; the brand (top left) is the home button | done |
 | F10 | Search suggestions (last 3 searches + 5 examples) and History tab | done |
 | F11 | "About SPHEREx" tab | done |
-| F12 | Loading indicator in the app's look (the logo with a turning orbit) | done |
+| F12 | Loading indicator in the app's look (the logo's three epoch dots light up in turn) | done |
 | F13 | Live "loaded" state of the dots in the frame plot | done |
 | F14 | Deep Analysis drawer: difference pictures per detector / all combined, status and compute on click, explanation, spectrum, metadata | done |
 
@@ -158,7 +158,7 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 
 - **Changed (2026-11-14):** not 102 channel steps but one continuous axis in µm, from `coverage.wavelength_range_um` (about 0.74 to 5.0 µm), as the backend API defines it (`docs/API.md` section 1). Every SPHEREx pixel has its own wavelength, so channels are not a useful unit here.
 - The frontend picks the frame of the current season nearest to the slider value (`pickFrame`, no request). If none lies within 2 bandwidths, a notice shows the nearest wavelength.
-- Band chips D1-D6 above the sliders jump into a detector's range; their ranges and counts come from the data.
+- Arrow buttons under each slider step one season (earlier/later) or one image of the season by wavelength (shorter/longer), so nobody has to drag the slider; they stop playback first.
 
 **Notes for both sliders:**
 - Changes are sent to the backend as parameters; to avoid a request on every pixel of slider movement, requests should be debounced or sent on release.
@@ -170,13 +170,14 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 - The frontend sends the name to the backend; the **backend** finds the matching coordinates/parameters and returns them.
 - The frontend then loads the available points in time for the time slider (F2) and shows the first image in F1.
 - Handles "not found" and errors with a clear message. Optional later: suggestions while typing, recent searches.
+- While the box is empty it shows a real example input (`SEARCH_HINTS` in `core/examples.ts`: names and coordinates in all three accepted forms) that changes every 4 s. Coordinates only of the two targets that do not move: a moving star's J2000 position is outside the default field today.
 
 ### F9-F13 (added 2026-11-15)
 
 - **F9 Start page / home:** the idle screen shows the logo, the slogan and the example targets. Clicking the brand (`ViewerState.reset()`) forgets the target, clears the page URL and returns there.
 - **F10 Suggestions and history:** while the search box has the focus it lists the last 3 searches and always the 5 examples (arrow keys + Enter, Esc closes). `HistoryService` stores successful searches (max 50, newest first, no duplicates) in `localStorage` under `challenger5.history`. The History tab lists them all; click to search again, ✕ removes one.
 - **F11 About SPHEREx:** mission facts, what the tool does, the data and links, known limits, the required acknowledgement and DOIs. Text and links are taken from `docs/spherex/`; update it when the releases in use change.
-- **Menu tabs:** the buttons at the bottom right (About SPHEREx, History, Controls) each open the drawer on their tab; the drawer stays on the right, so the stage stays on the left. A new tab = one entry in `TABS` (`home.ts`) plus a `@case` in the drawer. The buttons are a labelled stack on a wide stage and an icon row otherwise, so they never cover the picture.
+- **Menu tabs:** the buttons at the bottom right, top to bottom Controls, Deep Analysis, History, About SPHEREx; each tab button opens the drawer on its tab, the drawer stays on the right, so the stage stays on the left. A new tab = one entry in `TABS` (`home.ts`) plus a `@case` in the drawer. The buttons are always a vertical stack (labelled on a wide stage, icons only in the stage's right padding otherwise), so they never cover the picture; only on phones (< 600 px) they are a row along the bottom edge.
 - **F12 Loader:** `<app-logo [spin]="true">` is used for the search button, the lookup/coverage panel, the first image and (small, top right of the picture) a frame that takes longer than 0.7 s.
 - **No dimming while loading:** the shown picture stays untouched until the next one has arrived; it is then swapped at once.
 - **F13 Live dots:** a dot is green when its image is loaded and pulses amber while it loads. `ViewerState.cacheOf(frame)` combines what this page loaded or is loading (`ApiService.loaded` / `pending`, immediate) with a `/coverage` refresh every 2 s while downloads run and every 8 s otherwise (paused while the browser tab is hidden).
@@ -190,7 +191,7 @@ F2 and F3 are the two sliders for now. They sit in a **collapsible menu** (e.g. 
 
 ### F14: Deep Analysis (difference pictures)
 
-A second drawer on the main page, opened with its own **Deep Analysis** button in the menu dock (between History and Controls) (side drawer from 900 px, bottom sheet below; only one of the two drawers is open at a time). Built against `docs/API_ANALYSIS.md` (`GET /api/analysis`, `/api/analysis/{bundle}/diff.png`, `/api/analysis/spectrum`), which takes the same target parameters as the slider picture.
+A second drawer on the main page, opened with its own **Deep Analysis** button in the menu dock (below Controls) (side drawer from 900 px, bottom sheet below; only one of the two drawers is open at a time). Built against `docs/API_ANALYSIS.md` (`GET /api/analysis`, `/api/analysis/{bundle}/diff.png`, `/api/analysis/spectrum`), which takes the same target parameters as the slider picture.
 
 - **What it shows:** only the difference pictures (latest minus first epoch, "Total"), **per detector** (default) or **all combined**. While the drawer is open, the stage shows the difference tiles instead of the slider picture and the slider HUD and keys are off. Click a tile to enlarge it with its metadata; click a pixel for its spectrum per epoch.
 - **Position:** the view of the main page: the same target as the slider picture (`ViewerState.target()`: position from `GET /api/resolve`, its field of view, its proper motion). For the five test targets at their default field of view this hits the backend's precomputed results.
@@ -236,9 +237,9 @@ Rules:
 ## 6. Design and UX rules
 
 - **Visualization first:** controls are secondary and can be collapsed.
-- **Deep-space theme:** near-black blue background with a CSS starfield and nebula glow (`.sky`), glass panels (`.glass`), an indigo/cyan/violet accent gradient (`--grad`). Colors are CSS variables in [`styles.scss`](src/styles.scss) (`--bg`, `--fg`, `--muted`, `--border`, `--accent*`, `--ready`, ...). New colors are added there as variables, not hard-coded in components. `--no-data` and `--masked` match the colours the backend paints into the pictures; do not restyle them.
+- **Deep-space theme:** near-black blue background with a CSS starfield and a faint tint (`.sky`), glass panels (`.glass`), and one plain blue (`--primary`) for buttons, sliders and the active state: no gradients, no glows (they looked overstyled). Colors are CSS variables in [`styles.scss`](src/styles.scss) (`--bg`, `--fg`, `--muted`, `--border`, `--accent*`, `--ready`, ...). New colors are added there as variables, not hard-coded in components. `--no-data` and `--masked` match the colours the backend paints into the pictures; do not restyle them.
 - Fonts (self-hosted via `@fontsource-variable/*`, registered in `angular.json`, so no request to a font CDN): **Space Grotesk** for headings and the brand (`--font-display`), **Inter** for text (`--font-body`), **JetBrains Mono** for numbers and identifiers (`--font-mono`, class `.num`).
-- Motion is small and functional (twinkling stars, loader, hover glow) and switched off with `prefers-reduced-motion`.
+- Motion is small and functional (twinkling stars, loader, rotating search hint) and switched off with `prefers-reduced-motion`.
 - Clear loading and error states; never a blank screen without explanation.
 - Accessible: keyboard operable, visible focus, labels for all sliders and inputs.
 - Component styles stay small (build budget: warning at 4 kB, error at 8 kB per component style). Shared styles go into `styles.scss`.

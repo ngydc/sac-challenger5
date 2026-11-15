@@ -22,17 +22,6 @@
   color: var(--warn);
 }
 
-.btn.primary {
-  border-color: transparent;
-  background: var(--slider);
-  color: #fff;
-  font-weight: 600;
-
-  &:hover:not(:disabled) {
-    background: #4a8ef8;
-  }
-}
-
 .btn.big {
   min-height: 48px;
   padding: 0.6rem 1.4rem;
@@ -79,7 +68,7 @@
   span {
     display: block;
     height: 100%;
-    background: linear-gradient(90deg, var(--slider), var(--accent));
+    background: var(--primary);
     transition: width 0.4s ease;
   }
 }
@@ -291,7 +280,7 @@
   padding: 1rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, #171b25, var(--surface));
+  background: var(--surface);
 
   > header {
     display: flex;
@@ -458,7 +447,7 @@
     min-width: 3.4rem;
   }
   .btn:has(input:focus-visible) {
-    outline: 2px solid var(--accent-2);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 }
@@ -470,7 +459,7 @@
 .deep-stage {
   position: relative; /* above the stage's .sky backdrop: that one is positioned, so it would be painted over plain content */
   height: 100%;
-  padding-bottom: 64px; /* the last tiles scroll clear of the Deep Analysis / Controls buttons */
+  padding-bottom: 64px; /* on phones the last tiles scroll clear of the menu buttons' row */
   overflow-y: auto;
   scrollbar-width: thin;
 
