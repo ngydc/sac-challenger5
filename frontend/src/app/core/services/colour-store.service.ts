@@ -7,7 +7,8 @@ import { targetQuery } from './api.service';
 import { AnalysisStatus, ColourEpoch } from '../models/epochs.models';
 import { Target } from '../models/api.models';
 
-const busy = (s: AnalysisStatus | null) => !!s && (s.state === 'queued' || s.state === 'running');
+/** Unlike the shared `busy`, a refresh does not count: the old colour pictures stay valid and are shown meanwhile. */
+const computing = (s: AnalysisStatus | null) => !!s && (s.state === 'queued' || s.state === 'running');
 
 /**
  * The colour view: every wavelength of one season in one picture (GET /api/analysis/colour/{epoch}.png,
@@ -27,7 +28,7 @@ export class ColourStore {
   readonly status = computed<AnalysisStatus | null>(() => {
     const t = this.viewer.target();
     const s = t ? this.analysis.status(t)() : null;
-    return this.starting() && !busy(s) ? null : s;
+    return this.starting() && !computing(s) ? null : s;
   });
   readonly error = signal<string | null>(null);
 
@@ -37,7 +38,7 @@ export class ColourStore {
   private readonly preloaded = new Set<string>();
 
   readonly colour = computed(() => this.status()?.result?.colour ?? null);
-  readonly running = computed(() => busy(this.status()));
+  readonly running = computed(() => computing(this.status()));
   /** Changes when the analysis was recomputed with new images: part of the URL, so the new picture loads. */
   readonly version = computed(() => this.status()?.result?.images_key ?? '');
   readonly grid = computed(() => this.status()?.result?.grid ?? null);
